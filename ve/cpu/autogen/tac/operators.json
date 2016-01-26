@@ -69,6 +69,9 @@
     {"id": 65, "name": "KP_FLOOD",     "nop": 1, "types": []},
     {"id": 66, "name": "KP_RANDOM",    "nop": 2, "types": []},
     {"id": 67, "name": "KP_RANGE",     "nop": 0, "types": []},
+    
+    {"id": 68, "name": "KP_ARG_MAXIMUM", "nop": 3, "types": []},
+    {"id": 69, "name": "KP_ARG_MINIMUM", "nop": 3, "types": []},
 
-    {"id": 68, "name": "KP_EXTENSION_OPERATOR","nop": 0, "types": []}
+    {"id": 70, "name": "KP_EXTENSION_OPERATOR","nop": 0, "types": []}
 ]
