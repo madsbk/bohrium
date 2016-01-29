@@ -1,5 +1,5 @@
 //
-//  AXIS-walker ND
+//  walking.axis.nd
 //
 //	Walks the iteration-space using other/axis loop constructs.
 //	Partitions work into chunks of size equal to the "axis" dimension.
@@ -63,7 +63,7 @@
 
         // Accumulator DECLARE COMPLETE - begin
         {{ACCU_LOCAL_DECLARE_COMPLETE}}
-        // Accumulator DECLARE COMPLETE - end        
+        // Accumulator DECLARE COMPLETE - end
 
         const int64_t eidx_begin = work_offset*chunksize;
         const int64_t eidx_end   = work_end*chunksize;
@@ -84,9 +84,9 @@
             }
             // Walker step non-axis / operand offset - end
 
-            // Accumulator DECLARE - begin
+            // Accumulator DECLARE PARTIAL - begin
             {{ACCU_LOCAL_DECLARE_PARTIAL}}
-            // Accumulator DECLARE - end
+            // Accumulator DECLARE PARTIAL - end
 
             {{PRAGMA_SIMD}}
             for (int64_t aidx=0; aidx < axis_shape; aidx++) {
@@ -103,7 +103,7 @@
             // Accumulator PARTIAL SYNC - end
         }
         // Write EXPANDED scalars back to memory - begin
-        if (0==tid) {   // Write EXPANDED scalars back to memory.
+        if (0==tid) {
             {{WRITE_EXPANDED_SCALARS}}
         }
         // Write EXPANDED scalars back to memory - end

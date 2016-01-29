@@ -1,5 +1,5 @@
 //
-//  INNER-WALKER
+//  walker.inner.nd
 //
 //	Walks the iteration-space using outer/inner loop constructs.
 //	Partitions work into chunks of size equal to the inner-most dimension.
@@ -47,7 +47,7 @@
 
         // Accumulator DECLARE COMPLETE - begin
         {{ACCU_LOCAL_DECLARE_COMPLETE}}
-        // Accumulator DECLARE COMPLETE - end        
+        // Accumulator DECLARE COMPLETE - end
 
         const int64_t eidx_begin = work_offset*chunksize;
         const int64_t eidx_end   = work_end*chunksize;
@@ -69,7 +69,7 @@
 
             // Accumulator DECLARE PARTIAL - begin
             {{ACCU_LOCAL_DECLARE_PARTIAL}}
-            // Accumulator DECLARE PARTIAL - end        
+            // Accumulator DECLARE PARTIAL - end
 
             {{PRAGMA_SIMD}}
             for (int64_t iidx=0; iidx < chunksize; iidx++) {
