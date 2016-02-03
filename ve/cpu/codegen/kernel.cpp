@@ -139,28 +139,26 @@ kernel_tac_iter Kernel::tacs_end(void)
 
 string Kernel::generate_source(bool offload)
 {
-    std::map<string, string> subjects;
+    Skeleton code(plaid_, "skel.kernel");
+
     Walker walker(plaid_, *this);
 
-    if (block_.narray_tacs()>1) {
-        subjects["MODE"] = "FUSED";
-    } else {
-        subjects["MODE"] = "SIJ";
-    }
-    subjects["LAYOUT"]          = layout_text(block_.iterspace().layout);
-    subjects["NINSTR"]          = to_string(block_.ntacs());
-    subjects["NARRAY_INSTR"]    = to_string(block_.narray_tacs());
-    subjects["NARGS"]           = to_string(block_.noperands());
-    subjects["NARRAY_ARGS"]     = to_string(operands_.size());
-    subjects["OMASK"]           = omask_text(omask());
-    subjects["SYMBOL_TEXT"]     = block_.symbol_text();
-    subjects["SYMBOL"]          = block_.symbol();
-    subjects["BUFFERS"]         = unpack_buffers();
-    subjects["ARGUMENTS"]       = unpack_arguments();
-    subjects["ITERSPACE"]       = unpack_iterspace();
-    subjects["WALKER"]          = walker.generate_source(offload);
+    code["MODE"]            = (block_.narray_tacs()>1) ? "FUSED" : "SIJ";
+    code["LAYOUT"]          = layout_text(block_.iterspace().layout);
+    code["NINSTR"]          = to_string(block_.ntacs());
+    code["NARRAY_INSTR"]    = to_string(block_.narray_tacs());
+    code["NARGS"]           = to_string(block_.noperands());
+    code["NARRAY_ARGS"]     = to_string(operands_.size());
+    code["OMASK"]           = omask_text(omask());
+    code["SYMBOL_TEXT"]     = block_.symbol_text();
+    code["SYMBOL"]          = block_.symbol();
 
-    return plaid_.fill("kernel", subjects);
+    code["HEAD"]    += unpack_iterspace();
+    code["HEAD"]    += unpack_buffers();
+    code["HEAD"]    += unpack_arguments();
+    code["BODY"]    = walker.generate_source(offload);
+
+    return code.emit();
 }
 
 string Kernel::unpack_iterspace(void)
