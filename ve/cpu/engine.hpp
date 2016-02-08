@@ -24,6 +24,7 @@ public:
         const size_t vcache_size,
         const bool preload,
         const bool jit_enabled,
+        const bool jit_nested,
         const bool jit_dumpsrc,
         const bool jit_fusion,
         const bool jit_contraction,
@@ -43,6 +44,7 @@ public:
     size_t vcache_size(void);
     bool preload(void);
     bool jit_enabled(void);
+    bool jit_nested(void);
     bool jit_dumpsrc(void);
     bool jit_fusion(void);
     bool jit_contraction(void);
@@ -63,6 +65,7 @@ private:
 
     bool preload_,
          jit_enabled_,
+         jit_nested_,
          jit_dumpsrc_,
          jit_fusion_,
          jit_contraction_;

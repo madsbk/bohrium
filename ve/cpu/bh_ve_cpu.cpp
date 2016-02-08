@@ -84,6 +84,7 @@ bh_error bh_ve_cpu_init(const char *name)
     bool preload;
 
     bh_intp jit_level;
+    bool jit_nested;
     bool jit_dumpsrc;
     bh_intp jit_offload;
 
@@ -102,6 +103,7 @@ bh_error bh_ve_cpu_init(const char *name)
         (BH_SUCCESS!=bh_component_config_int_option(&myself, "vcache_size", 0, 100, &vcache_size))  or \
         (BH_SUCCESS!=bh_component_config_bool_option(&myself, "preload", &preload))                 or \
         (BH_SUCCESS!=bh_component_config_int_option(&myself, "jit_level", 0, 3, &jit_level))        or \
+        (BH_SUCCESS!=bh_component_config_bool_option(&myself, "jit_nested",  &jit_nested))        or \
         (BH_SUCCESS!=bh_component_config_bool_option(&myself, "jit_dumpsrc", &jit_dumpsrc))         or \
         (BH_SUCCESS!=bh_component_config_int_option(&myself, "jit_offload", 0, 2, &jit_offload))    or \
         (BH_SUCCESS!=bh_component_config_string_option(&myself, "compiler_cmd", &compiler_cmd))     or \
@@ -184,6 +186,7 @@ bh_error bh_ve_cpu_init(const char *name)
         (size_t)vcache_size,
         preload,
         jit_enabled,
+        jit_nested,
         jit_dumpsrc,
         jit_fusion,
         jit_contraction,

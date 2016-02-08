@@ -260,6 +260,7 @@ bind = ${VE_CPU_BIND}
 vcache_size = ${VE_CPU_VCACHE_SIZE}
 preload = ${VE_CPU_PRELOAD}
 jit_level = ${VE_CPU_JIT_LEVEL}
+jit_nested = ${VE_CPU_JIT_NESTED}
 jit_dumpsrc = ${VE_CPU_JIT_DUMPSRC}
 jit_offload = ${VE_CPU_JIT_OFFLOAD}
 compiler_cmd="${VE_CPU_COMPILER_CMD}"

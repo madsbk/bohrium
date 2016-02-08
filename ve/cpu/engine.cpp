@@ -18,6 +18,7 @@ Engine::Engine(
     const size_t vcache_size,
     const bool preload,
     const bool jit_enabled,
+    const bool jit_nested,
     const bool jit_dumpsrc,
     const bool jit_fusion,
     const bool jit_contraction,
@@ -34,6 +35,7 @@ Engine::Engine(
 :   rt_(NULL),
     preload_(preload),
     jit_enabled_(jit_enabled),
+    jit_nested_(jit_nested),
     jit_dumpsrc_(jit_dumpsrc),
     jit_fusion_(jit_fusion),
     jit_contraction_(jit_contraction),
@@ -78,6 +80,11 @@ bool Engine::preload(void)
 bool Engine::jit_enabled(void)
 {
     return jit_enabled_;
+}
+
+bool Engine::jit_nested(void)
+{
+    return jit_nested_;
 }
 
 bool Engine::jit_dumpsrc(void)
