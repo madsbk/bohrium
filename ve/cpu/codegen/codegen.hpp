@@ -431,6 +431,62 @@ private:
 
 };
 
+class Emitter
+{
+public:
+    Emitter(Plaid& plaid, kp::core::Block& block);
+    
+    std::string generate_source(bool offload);
+
+    uint64_t noperands(void);
+    Operand& operand_glb(uint64_t gidx);
+    Operand& operand_lcl(uint64_t lidx);
+
+    kernel_operand_iter operands_begin(void);
+    kernel_operand_iter operands_end(void);
+
+    kernel_buffer_iter buffers_begin(void);
+    kernel_buffer_iter buffers_end(void);
+
+    Iterspace& iterspace(void);
+
+    uint64_t base_refcount(uint64_t gidx);
+
+    uint32_t omask(void);
+    std::string text(void);
+
+    uint64_t ntacs(void);
+    kp_tac & tac(uint64_t tidx);
+    kernel_tac_iter tacs_begin(void);
+    kernel_tac_iter tacs_end(void);
+
+    kp::core::Block& block(void);
+
+    std::string oper_description(kp_tac tac);
+    std::string oper_neutral_element(KP_OPERATOR oper, KP_ETYPE etype);
+    std::string oper(KP_OPERATOR oper, KP_ETYPE etype, std::string in1, std::string in2);
+    std::string synced_oper(KP_OPERATOR oper, KP_ETYPE etype, std::string out, std::string in1, std::string in2);
+
+private:
+    std::string unpack_buffers(void);
+    std::string unpack_arguments(void);
+    std::string unpack_iterspace(void);
+    
+    std::string buffers(void);
+    std::string args(void);
+
+    void add_operand(uint64_t global_idx);
+
+    Plaid& plaid_;
+    kp::core::Block& block_;
+
+    kernel_buffers buffers_;
+    kernel_operands operands_;
+    Iterspace iterspace_;
+
+    kernel_tacs tacs_;
+};
+
 }}}
 
 #endif
