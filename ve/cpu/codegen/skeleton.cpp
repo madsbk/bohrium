@@ -12,6 +12,11 @@ namespace codegen{
 
 Skeleton::Skeleton(Plaid& plaid, std::string skeleton) : plaid_(plaid), skeleton_(skeleton) {}
 
+void Skeleton::reset(void)
+{
+    subjects_.clear();
+}
+
 string Skeleton::emit(void)
 {
     return plaid_.fill(skeleton_, subjects_);

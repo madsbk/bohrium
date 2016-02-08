@@ -210,6 +210,8 @@ public:
 
     std::string& operator[](const std::string& subject) { return subjects_[subject]; }
 
+    void reset(void);
+
 protected:
     Plaid& plaid_;
 
@@ -217,6 +219,7 @@ protected:
 
     std::map<std::string, std::string> subjects_;
 };
+
 
 class Buffer
 {
