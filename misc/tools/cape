@@ -94,25 +94,25 @@ def kompile(options, nr):
 def main():
 
     parser = argparse.ArgumentParser(description='Invoke the backend compiler on CAPE generated kernels.')
-    parser.add_argument('-l', '--list', action="store_true", help="List generated kernels")
-    parser.add_argument('-k', '--kompile', type=int, help="Compile kernel #nr, use -l/--list to show kernels.")
+    parser.add_argument('-l', action="store_true", help="List generated kernels")
+    parser.add_argument('nr', nargs='?', type=int, help="Compile kernel #nr, use -l/--list to show kernels.")
 
     args = parser.parse_args()
-
-    if not args.list and not args.kompile:
+    if not args.l and args.nr is None:
         parser.print_help()
         return
 
     options = get_options()
-    if args.list:
+
+    if args.l:
         msg("* Listing kernels *")
         list_kernels(options)
 
-    if args.kompile:
+    if args.nr is not None:
         kernels = get_kernels(options)
-        if len(kernels) >= args.kompile:
-            msg("* Compiling [%d] %s *" % (args.kompile, kernels[args.kompile]))
-            kompile(options, args.kompile)
+        if len(kernels) >= args.nr:
+            msg("* Compiling [%d] %s *" % (args.nr, kernels[args.nr]))
+            kompile(options, args.nr)
 
 if __name__ == "__main__":
     main()
