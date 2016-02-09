@@ -104,31 +104,26 @@ def kernel_editor(options, nr):
 def main():
 
     parser = argparse.ArgumentParser(description='Invoke the backend compiler on CAPE generated kernels.')
-    parser.add_argument('-l', action="store_true", help="List generated kernels")
-    parser.add_argument('-e', type=int, help="Open kernel with default editor")
-    parser.add_argument('nr', nargs='?', type=int, help="Compile kernel #nr, use -l/--list to show kernels.")
+    parser.add_argument('-e', action="store_true", help="Open kernel with default editor")
+    parser.add_argument('nr', nargs='?', type=int, help="Compile kernel #NR")
 
     args = parser.parse_args()
-    if not args.l and args.e is None and args.nr is None:
-        parser.print_help()
-        return
 
-    options = get_options()
-    
-    if args.l:
+    options = get_options() # Grab options from configuration file
+    if args.nr is None:
         msg("* Listing kernels *")
         list_kernels(options)
+    else:
 
-    if args.e is not None:
         kernels = get_kernels(options)
-        if len(kernels) > args.e:
-            kernel_editor(options, args.e)
-
-    if args.nr is not None:
-        kernels = get_kernels(options)
-        if len(kernels) > args.nr:
-            msg("* Compiling [%d] %s *" % (args.nr, kernels[args.nr]))
-            kompile(options, args.nr)
-
+        if args.nr >= len(kernels):
+            msg("* Invalid kernel #NR *")
+        else:
+            if args.e:
+                kernel_editor(options, args.e)
+            else:
+                msg("* Compiling [%d] %s *" % (args.nr, kernels[args.nr]))
+                kompile(options, args.nr)
+            
 if __name__ == "__main__":
     main()
