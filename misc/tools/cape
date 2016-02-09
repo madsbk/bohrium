@@ -109,22 +109,24 @@ def main():
     parser.add_argument('nr', nargs='?', type=int, help="Compile kernel #nr, use -l/--list to show kernels.")
 
     args = parser.parse_args()
-    if not args.l and not args.e and args.nr is None:
+    if not args.l and args.e is None and args.nr is None:
         parser.print_help()
         return
 
     options = get_options()
-
+    
     if args.l:
         msg("* Listing kernels *")
         list_kernels(options)
 
     if args.e is not None:
-        kernel_editor(options, args.e)
+        kernels = get_kernels(options)
+        if len(kernels) > args.e:
+            kernel_editor(options, args.e)
 
     if args.nr is not None:
         kernels = get_kernels(options)
-        if len(kernels) >= args.nr:
+        if len(kernels) > args.nr:
             msg("* Compiling [%d] %s *" % (args.nr, kernels[args.nr]))
             kompile(options, args.nr)
 
