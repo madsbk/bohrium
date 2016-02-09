@@ -91,14 +91,25 @@ def kompile(options, nr):
     p = subprocess.Popen(cmd)                   # Invoke compiler
     p.communicate()
 
+def kernel_editor(options, nr):
+    kernels = get_kernels(options)              # Grab kernel path
+    kernel_path = kernels[nr]
+
+    EDITOR = os.environ.get('EDITOR', 'vim')
+
+    p = subprocess.call(
+        [EDITOR, kernel_path],
+    )
+
 def main():
 
     parser = argparse.ArgumentParser(description='Invoke the backend compiler on CAPE generated kernels.')
     parser.add_argument('-l', action="store_true", help="List generated kernels")
+    parser.add_argument('-e', type=int, help="Open kernel with default editor")
     parser.add_argument('nr', nargs='?', type=int, help="Compile kernel #nr, use -l/--list to show kernels.")
 
     args = parser.parse_args()
-    if not args.l and args.nr is None:
+    if not args.l and not args.e and args.nr is None:
         parser.print_help()
         return
 
@@ -107,6 +118,9 @@ def main():
     if args.l:
         msg("* Listing kernels *")
         list_kernels(options)
+
+    if args.e is not None:
+        kernel_editor(options, args.e)
 
     if args.nr is not None:
         kernels = get_kernels(options)
