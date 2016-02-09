@@ -159,6 +159,7 @@ string Engine::text()
     ss << "  vcache_size = "        << kp_rt_vcache_size(rt_) << endl;
     ss << "  preload = "            << this->preload_ << endl;    
     ss << "  jit_enabled = "        << this->jit_enabled_ << endl;    
+    ss << "  jit_nested = "         << this->jit_nested_ << endl;    
     ss << "  jit_dumpsrc = "        << this->jit_dumpsrc_ << endl;
     ss << "  jit_fusion = "         << this->jit_fusion_ << endl;
     ss << "  jit_contraction = "    << this->jit_contraction_ << endl;
@@ -192,8 +193,14 @@ bh_error Engine::process_block(Program &tac_program,
     if (consider_jit && \
         (!storage_.symbol_ready(block.symbol()))) {   
         DEBUG(TAG, "JITTING " << block.text());
+
+        string sourcecode;
                                                         // Genereate source
-        string sourcecode = codegen::Kernel(plaid_, block).generate_source(jit_offload_);
+        if (jit_nested()) {                             // Using the "nested" code generator
+            sourcecode = codegen::Emitter(plaid_, block).generate_source(jit_offload());
+        } else {                                        // Using the "regular" code generator
+            sourcecode = codegen::Kernel(plaid_, block).generate_source(jit_offload());
+        }
 
         bool compile_res;
         if (jit_dumpsrc_==1) {                          // Compile via file
