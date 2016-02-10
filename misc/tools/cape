@@ -151,6 +151,7 @@ def kernel_compile(options, num):
 
     for existing_object in existing_objects:    # Remove existing objects
         Msg.warn("Removing:", existing_object)
+        os.remove(existing_object)
 
     cmd = options["compiler"]["cmd"].split(" ")             # Setup command
     cmd += [kernel_path]
