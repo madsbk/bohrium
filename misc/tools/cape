@@ -55,12 +55,8 @@ def list_kernels(options):
     for i, kernel_path in enumerate(kernels):
         print "[%d] %s" % (i, kernel_path)
 
-def kompile(options, nr):
-    kernels = get_kernels(options)              # Grab kernel path
-    kernel_path = kernels[nr]
-
-    object_fn       = os.path.basename(kernel_path).replace(".c", ".so")
-    object_name, _  = os.path.splitext(object_fn)
+def object_inventory(options, object_name):
+    """Searches object_path for existing instantiations or kernel/object."""
 
     existing_objects = []                       # Grab existing objects...
     object_roots = []                           # ...and object roots.
@@ -69,16 +65,32 @@ def kompile(options, nr):
         for filename in (fn for fn in files if object_name in fn):
             existing_objects.append(os.sep.join([root, filename]))
 
+    return existing_objects, object_roots
+
+def kernel_compile(options, num):
+    """Invoke the backend compiler for kernel # num."""
+
+    kernels = get_kernels(options)              # Grab kernel path
+    kernel_path = kernels[num]
+
+    object_fn = os.path.basename(kernel_path).replace(".c", ".so")
+    object_name, _ = os.path.splitext(object_fn)
+
+    existing_objects, object_roots = object_inventory(options, object_name)
+
     if len(object_roots) > 1:
-        print ("Warning: Multiple object roots.")
+        print "Warning: Multiple object roots."
     elif len(object_roots) == 0:
-        print ("Warning: No object root")
+        print "Warning: No object root"
+
+    for existing_object in existing_objects:
+        Cli.info(" * Overwriting: %s" % existing_object)
 
     object_path = os.sep.join([
         options["path"]["object"], object_roots[0], object_fn
     ])
 
-    cmd = options["compiler"]["cmd"].split(" ") # Setup compile command
+    cmd = options["compiler"]["cmd"].split(" ")         # Setup command
     cmd += [kernel_path]
     cmd += options["compiler"]["lib"].split(" ")
     cmd += options["compiler"]["flg"].split(" ")
@@ -86,44 +98,59 @@ def kompile(options, nr):
     cmd += options["compiler"]["inc"].split(" ")
     cmd += ["-o", object_path]
 
-    cmd = [c for c in cmd if c]                 # Remove empty entries
+    process = subprocess.Popen([c for c in cmd if c])   # Invoke compiler
+    process.communicate()
 
-    p = subprocess.Popen(cmd)                   # Invoke compiler
-    p.communicate()
+def kernel_editor(options, num):
+    """Open editor ($EDITOR) for kernel # num."""
 
-def kernel_editor(options, nr):
     kernels = get_kernels(options)              # Grab kernel path
-    kernel_path = kernels[nr]
+    kernel_path = kernels[num]
 
-    EDITOR = os.environ.get('EDITOR', 'vim')
+    editor = os.environ.get('EDITOR', 'vim')
 
-    p = subprocess.call(
-        [EDITOR, kernel_path],
+    res = subprocess.call(
+        [editor, kernel_path],
     )
+    if res:
+        Cli.fail("* Failered opening editor, set env-var $EDITOR. *")
 
 def main():
+    """Script entry: argument parsing and dispatch."""
 
-    parser = argparse.ArgumentParser(description='Invoke the backend compiler on CAPE generated kernels.')
-    parser.add_argument('-e', action="store_true", help="Open kernel with default editor")
-    parser.add_argument('nr', nargs='?', type=int, help="Compile kernel #NR")
+    parser = argparse.ArgumentParser(
+        description='Invoke the backend compiler on CAPE generated kernels.'
+    )
+    parser.add_argument(
+        '-e',
+        action="store_true",
+        help="Open kernel with default editor"
+    )
+    parser.add_argument(
+        'num',
+        nargs='?',
+        type=int,
+        help="Compile kernel #num"
+    )
 
     args = parser.parse_args()
 
     options = get_options() # Grab options from configuration file
-    if args.nr is None:
-        msg("* Listing kernels *")
+    if args.num is None:
+        Cli.info("* Listing kernels *")
         list_kernels(options)
     else:
 
         kernels = get_kernels(options)
-        if args.nr >= len(kernels):
-            msg("* Invalid kernel #NR *")
+        num = args.num
+        if num >= len(kernels):
+            Cli.fail("* Invalid kernel #num *")
         else:
             if args.e:
-                kernel_editor(options, args.e)
+                kernel_editor(options, num)
             else:
-                msg("* Compiling [%d] %s *" % (args.nr, kernels[args.nr]))
-                kompile(options, args.nr)
-            
+                Cli.info("* Compiling [%d] %s *" % (num, kernels[num]))
+                kernel_compile(options, num)
+
 if __name__ == "__main__":
     main()
