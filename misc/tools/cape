@@ -22,6 +22,7 @@ import ConfigParser
 import subprocess
 import argparse
 import glob
+import sys
 import os
 
 DEFAULT_EDITOR = "vim"
@@ -108,13 +109,6 @@ def get_kernels(options):
 
     return sorted(glob.glob("%s%s*.c" % (options["path"]["kernel"], os.sep)))
 
-def list_kernels(options):
-    """Prints sorted list of source-files in kernel_path."""
-
-    kernels = get_kernels(options)
-    for i, kernel_path in enumerate(kernels):
-        Msg.info("[%d] %s" % (i, kernel_path))
-
 def object_inventory(options, object_name):
     """Searches object_path for existing instantiations or kernel/object."""
 
@@ -127,53 +121,60 @@ def object_inventory(options, object_name):
 
     return existing_objects, object_roots
 
-def kernel_compile(options, num):
+def cmd_compile(args, options):
     """Invoke the backend compiler for kernel # num."""
 
-    kernels = get_kernels(options)              # Grab kernel path
-    kernel_path = kernels[num]
-    kernel_fn = os.path.basename(kernel_path)
+    Msg.emph("Compiling %d kernel(s)" % len(args.num))
+    for num in args.num:
+        kernels = get_kernels(options)              # Grab kernels
+        kernel_path = kernels[num]                  # Grab path to kernel #num
+        kernel_fn = os.path.basename(kernel_path)
 
-    object_name = kernel_fn[:-9]                # Strip _r4nDuM.c
-    object_fn = "%s_MANUAL.so" % object_name
+        Msg.good("Kernel [%d]:" % num, kernel_path)
 
-    existing_objects, object_roots = object_inventory(options, object_name)
+        object_name = kernel_fn[:-9]                # Strip _r4nDuM.c
+        object_fn = "%s_MANUAL.so" % object_name
 
-    if len(object_roots) > 1:
-        Msg.warn("Warning:", "Multiple object roots, using the first.")
-    elif len(object_roots) == 0:
-        Msg.fail("Failed:", "Cannot find object root, aborting compilation.")
-        return
+        existing_objects, object_roots = object_inventory(
+            options,
+            object_name
+        )
 
-    object_path = os.sep.join([
-        options["path"]["object"], object_roots[0], object_fn
-    ])
+        if len(object_roots) > 1:
+            Msg.warn("Warning:", "Multiple object roots, using the first.")
+        elif len(object_roots) == 0:
+            Msg.fail("Aborting compilation:", "Unknown object root.")
+            return
 
-    for existing_object in existing_objects:    # Remove existing objects
-        Msg.warn("Removing:", existing_object)
-        os.remove(existing_object)
+        object_path = os.sep.join([
+            options["path"]["object"], object_roots[0], object_fn
+        ])
 
-    cmd = options["compiler"]["cmd"].split(" ")             # Setup command
-    cmd += [kernel_path]
-    cmd += options["compiler"]["lib"].split(" ")
-    cmd += options["compiler"]["flg"].split(" ")
-    cmd += options["compiler"]["ext"].split(" ")
-    cmd += options["compiler"]["inc"].split(" ")
-    cmd += ["-o", object_path]
+        for existing_object in existing_objects:        # Remove objects
+            Msg.warn("Removing:", existing_object)
+            os.remove(existing_object)
 
-    Msg.good("Creating:", object_path)
-    try:
-        process = subprocess.Popen([c for c in cmd if c])   # Invoke compiler
-        process.communicate()
-    except OSError as exception:
-        Msg.fail("Failed:", "Executing compiler, check bohrium configuration.")
-        Msg.fail("Details:", str(exception))
+        cmd = options["compiler"]["cmd"].split(" ")     # Setup command
+        cmd += [kernel_path]
+        cmd += options["compiler"]["lib"].split(" ")
+        cmd += options["compiler"]["flg"].split(" ")
+        cmd += options["compiler"]["ext"].split(" ")
+        cmd += options["compiler"]["inc"].split(" ")
+        cmd += ["-o", object_path]
 
-def kernel_editor(options, num):
+        Msg.good("Creating:", object_path)
+        try:                                            # Invoke compiler
+            process = subprocess.Popen([c for c in cmd if c])
+            process.communicate()
+        except OSError as exception:
+            Msg.fail("Failed:", "Executing compiler, check bohrium configuration.")
+            Msg.fail("Details:", str(exception))
+
+def cmd_edit(args, options):
     """Open editor ($EDITOR) for kernel # num."""
 
-    kernels = get_kernels(options)              # Grab kernel path
-    kernel_path = kernels[num]
+    kernels = get_kernels(options)              # Grab kernels
+    kernel_path = kernels[args.num]             # Grab kernel #num
 
     editor = os.environ.get('EDITOR')
     if not editor:
@@ -188,42 +189,79 @@ def kernel_editor(options, num):
         Msg.fail("Failed:", "opening kernel with $EDITOR(%s)." % editor)
         Msg.fail("Details: %s" % str(exception))
 
+def cmd_rm(args, options):
+    # TODO: Implement
+    print "Not implemented"
+
+def cmd_ls(args, options):
+    """Prints sorted list of source-files in kernel_path."""
+
+    kernels = get_kernels(options)
+
+    Msg.emph("Listing kernels")
+    for i, kernel_path in enumerate(kernels):
+        Msg.info("[%d] %s" % (i, kernel_path))
+
 def main():
     """Script entry: argument parsing and dispatch."""
 
     parser = argparse.ArgumentParser(
-        description='Invoke the backend compiler on CAPE generated kernels.'
-    )
-    parser.add_argument(
-        '-e',
-        action="store_true",
-        help="Open kernel with default editor"
-    )
-    parser.add_argument(
-        'num',
-        nargs='?',
-        type=int,
-        help="Compile kernel #num"
+        description='Manual instrumentation of CAPE backend compiler.'
     )
 
-    args = parser.parse_args()
+    subparsers = parser.add_subparsers(help='CAPE commands')
+
+
+    parser_compile = subparsers.add_parser( # Compiler arguments
+        'compile',
+        help='Compile kernel(s) (generated source)'
+    )
+    parser_compile.add_argument(
+        'num',
+        nargs='*',
+        type=int,
+        help='#num of the kernel to compile'
+    )
+    parser_compile.set_defaults(func=cmd_compile)
+
+    parser_edit = subparsers.add_parser(    # $EDITOR arguments
+        'edit',
+        help='Open kernel in $EDITOR'
+    )
+    parser_edit.add_argument(
+        'num',
+        type=int,
+        help='#num of the kernel to open in $EDITOR'
+    )
+    parser_edit.set_defaults(func=cmd_edit)
+
+    parser_compile = subparsers.add_parser( # Compiler arguments
+        'ls',
+        help='List kernels'
+    )
+    parser_compile.set_defaults(func=cmd_ls)
+
+    parser_rm = subparsers.add_parser(      # Removal of artifacts
+        'rm',
+        help='Remove instantiated kernels (objects/.so)'
+    )
+    parser_rm.add_argument(
+        'num',
+        nargs='*',
+        type=int,
+        help='baz help'
+    )
+    parser_rm.add_argument('-f', help='Force removal (do not prompt)')
+    parser_rm.set_defaults(func=cmd_rm)
+
+    if len(sys.argv) == 1:  # Print help when no sub-command or help is given
+        parser.print_help()
+        sys.exit(1)
 
     options = get_options() # Grab options from configuration file
-    if args.num is None:
-        Msg.emph("Listing kernels")
-        list_kernels(options)
-    else:
 
-        kernels = get_kernels(options)
-        num = args.num
-        if num >= len(kernels):
-            Msg.fail("Invalid kernel number (%d)" % num)
-        else:
-            if args.e:
-                kernel_editor(options, num)
-            else:
-                Msg.emph("Compiling [%d] %s" % (num, kernels[num]))
-                kernel_compile(options, num)
+    args = parser.parse_args()  # Parse arguments
+    args.func(args, options)    # Call command "cmd_*(args, options)"
 
 if __name__ == "__main__":
     main()
