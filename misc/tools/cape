@@ -1,32 +1,92 @@
 #!/usr/bin/env python
+"""
+    This tools is meant as an aid to debugging and analysing the kernels
+    generated with the cape/cpu engine.
+
+    * List kernels: ./cape
+    * Compile kernel number 2: ./cape 2
+    * Open kernel number 2 in $EDITOR: ./cape 2 -e
+
+    If you want to change compilation parameters, such as adding optimization
+    reports, changing optimization level, debug info etc. then simply modify
+    the bohrium config file.
+
+    It is thus a handy way to explore potential modifications to the
+    CAPE codegenerator, analyzing, debugging, and dumping auxilary information.
+
+    NOTE: When compiling a kernel all existing instantiations of that kernel
+    are removed. This is done via os.remove(), not with "rm -rf" so it is
+    only semi-dangerous.
+"""
 import ConfigParser
 import subprocess
 import argparse
-import pprint
 import glob
 import os
 
-class bcolors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
+DEFAULT_EDITOR = "vim"
+
+class Msg(object):
+    """
+    Helper for printing text using ANSI[1] escape code
+
+    [1] https://en.wikipedia.org/wiki/ANSI_escape_code
+    """
+
+    RESET = '\033[0m'
     BOLD = '\033[1m'
+    FAINT = '\033[2m'
+    ITALIC = '\033[3m'
     UNDERLINE = '\033[4m'
+    RED_HI = '\033[91m'
+    GREEN_HI = '\033[92m'
+    YELLOW_HI = '\033[93m'
+    BLUE_HI = '\033[94m'
+    PURPLE_HI = '\033[95m'
 
-def msg(text):
-    print bcolors.OKGREEN + text + bcolors.ENDC
+    def __init__(self):
+        pass
 
-def get_options(conf_path=None, section="cpu", areas=["compiler_", "_path"]):
+    @staticmethod
+    def info(*msgs):
+        """Print an informational message."""
+        print msgs
+
+    @staticmethod
+    def emph(*msgs):
+        """Print an emphasized message."""
+        head, tail = msgs[0], " " + " ".join(msgs[1:]) if msgs[1:] else ""
+        print Msg.BOLD + Msg.BLUE_HI + "** "+ head +" **"+ Msg.RESET + tail
+
+    @staticmethod
+    def good(*msgs):
+        """Print an green/good message."""
+        head, tail = msgs[0], " " + " ".join(msgs[1:]) if msgs[1:] else ""
+        print Msg.GREEN_HI + head + Msg.RESET + tail
+
+    @staticmethod
+    def warn(*msgs):
+        """Print a YELLOW_HI message."""
+        head, tail = msgs[0], " " + " ".join(msgs[1:]) if msgs[1:] else ""
+        print Msg.YELLOW_HI + head + Msg.RESET + tail
+
+    @staticmethod
+    def fail(*msgs):
+        """Print a failure message."""
+        head, tail = msgs[0], " " + " ".join(msgs[1:]) if msgs[1:] else ""
+        print Msg.RED_HI + head + Msg.RESET + tail
+
+def get_options(conf_path=None, section="cpu", areas=None):
     """
     Returns a dict formatted as: {"compiler": {...}, "path": {...}}.
     Containing the values of Bohrium config options in the.
     """
 
-    if not conf_path:
+    if conf_path is None:
         conf_path = os.sep.join(["$HOME", ".bohrium", "config.ini"])
+
+    if areas is None:
+        areas = ["compiler_", "_path"]
 
     conf_path = os.path.expandvars(os.path.expanduser(conf_path))
 
@@ -53,7 +113,7 @@ def list_kernels(options):
 
     kernels = get_kernels(options)
     for i, kernel_path in enumerate(kernels):
-        print "[%d] %s" % (i, kernel_path)
+        Msg.info("[%d] %s" % (i, kernel_path))
 
 def object_inventory(options, object_name):
     """Searches object_path for existing instantiations or kernel/object."""
@@ -72,25 +132,27 @@ def kernel_compile(options, num):
 
     kernels = get_kernels(options)              # Grab kernel path
     kernel_path = kernels[num]
+    kernel_fn = os.path.basename(kernel_path)
 
-    object_fn = os.path.basename(kernel_path).replace(".c", ".so")
-    object_name, _ = os.path.splitext(object_fn)
+    object_name = kernel_fn[:-9]                # Strip _r4nDuM.c
+    object_fn = "%s_MANUAL.so" % object_name
 
     existing_objects, object_roots = object_inventory(options, object_name)
 
     if len(object_roots) > 1:
-        print "Warning: Multiple object roots."
+        Msg.warn("Warning:", "Multiple object roots, using the first.")
     elif len(object_roots) == 0:
-        print "Warning: No object root"
-
-    for existing_object in existing_objects:
-        Cli.info(" * Overwriting: %s" % existing_object)
+        Msg.fail("Failed:", "Cannot find object root, aborting compilation.")
+        return
 
     object_path = os.sep.join([
         options["path"]["object"], object_roots[0], object_fn
     ])
 
-    cmd = options["compiler"]["cmd"].split(" ")         # Setup command
+    for existing_object in existing_objects:    # Remove existing objects
+        Msg.warn("Removing:", existing_object)
+
+    cmd = options["compiler"]["cmd"].split(" ")             # Setup command
     cmd += [kernel_path]
     cmd += options["compiler"]["lib"].split(" ")
     cmd += options["compiler"]["flg"].split(" ")
@@ -98,8 +160,13 @@ def kernel_compile(options, num):
     cmd += options["compiler"]["inc"].split(" ")
     cmd += ["-o", object_path]
 
-    process = subprocess.Popen([c for c in cmd if c])   # Invoke compiler
-    process.communicate()
+    Msg.good("Creating:", object_path)
+    try:
+        process = subprocess.Popen([c for c in cmd if c])   # Invoke compiler
+        process.communicate()
+    except OSError as exception:
+        Msg.fail("Failed:", "Executing compiler, check bohrium configuration.")
+        Msg.fail("Details:", str(exception))
 
 def kernel_editor(options, num):
     """Open editor ($EDITOR) for kernel # num."""
@@ -107,13 +174,18 @@ def kernel_editor(options, num):
     kernels = get_kernels(options)              # Grab kernel path
     kernel_path = kernels[num]
 
-    editor = os.environ.get('EDITOR', 'vim')
+    editor = os.environ.get('EDITOR')
+    if not editor:
+        Msg.warn("Env $EDITOR is not set, defaulting to %s" % DEFAULT_EDITOR)
+        editor = DEFAULT_EDITOR
 
-    res = subprocess.call(
-        [editor, kernel_path],
-    )
-    if res:
-        Cli.fail("* Failered opening editor, set env-var $EDITOR. *")
+    try:
+        subprocess.call(
+            [editor, kernel_path],
+        )
+    except OSError as exception:
+        Msg.fail("Failed:", "opening kernel with $EDITOR(%s)." % editor)
+        Msg.fail("Details: %s" % str(exception))
 
 def main():
     """Script entry: argument parsing and dispatch."""
@@ -137,19 +209,19 @@ def main():
 
     options = get_options() # Grab options from configuration file
     if args.num is None:
-        Cli.info("* Listing kernels *")
+        Msg.emph("Listing kernels")
         list_kernels(options)
     else:
 
         kernels = get_kernels(options)
         num = args.num
         if num >= len(kernels):
-            Cli.fail("* Invalid kernel #num *")
+            Msg.fail("Invalid kernel number (%d)" % num)
         else:
             if args.e:
                 kernel_editor(options, num)
             else:
-                Cli.info("* Compiling [%d] %s *" % (num, kernels[num]))
+                Msg.emph("Compiling [%d] %s" % (num, kernels[num]))
                 kernel_compile(options, num)
 
 if __name__ == "__main__":
