@@ -50,7 +50,7 @@ class Msg(object):
     @staticmethod
     def info(*msgs):
         """Print an informational message."""
-        print msgs
+        print " ".join(msgs)
 
     @staticmethod
     def emph(*msgs):
