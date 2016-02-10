@@ -77,6 +77,18 @@ class Msg(object):
         head, tail = msgs[0], " " + " ".join(msgs[1:]) if msgs[1:] else ""
         print Msg.RED_HI + head + Msg.RESET + tail
 
+def prompt(msg=None):
+    """Prompt the user for confirmation, choises: [Yes/No/All]"""
+
+    if msg is None:
+        msg = "Are you sure? [Yes|No|All] "
+        
+    response = raw_input(msg).lower().strip()
+    confirmed_all = response != "" and response[0] == "a"
+    confirmed = confirmed_all or response == "" or response[0] == "y"
+
+    return confirmed, confirmed_all
+
 def get_options(conf_path=None, section="cpu", areas=None):
     """
     Returns a dict formatted as: {"compiler": {...}, "path": {...}}.
@@ -124,9 +136,14 @@ def object_inventory(options, object_name):
 def cmd_compile(args, options):
     """Invoke the backend compiler for kernel # num."""
 
-    Msg.emph("Compiling %d kernel(s)" % len(args.num))
-    for num in args.num:
-        kernels = get_kernels(options)              # Grab kernels
+    kernels = get_kernels(options)      # Grab kernels
+    numbers = args.num
+
+    if not numbers:                     # Compile all when none is provided
+        numbers = range(0, len(kernels))
+
+    Msg.emph("Compiling %d kernel(s)" % len(numbers))
+    for num in numbers:
         kernel_path = kernels[num]                  # Grab path to kernel #num
         kernel_fn = os.path.basename(kernel_path)
 
@@ -190,8 +207,35 @@ def cmd_edit(args, options):
         Msg.fail("Details: %s" % str(exception))
 
 def cmd_rm(args, options):
-    # TODO: Implement
-    print "Not implemented"
+    """Remove objects related to kernel # num."""
+
+    kernels = get_kernels(options)      # Grab kernels
+    numbers = args.num
+    force = args.f
+
+    if not numbers:                     # Compile all when none is provided
+        numbers = range(0, len(kernels))
+
+    for num in numbers:
+        kernel_path = kernels[num]
+        kernel_fn = os.path.basename(kernel_path)
+        object_name = kernel_fn[:-9]
+
+        objects, _ = object_inventory(options, object_name)
+        Msg.emph("Removing %d instantiation(s) of kernel #%d" % (
+            len(objects), num
+        ))
+        
+        for obj in objects:
+            Msg.warn("Removing:", obj)
+
+            confirmed = force
+            if not force:
+                confirmed, confirmed_all = prompt()
+                force = confirmed_all
+
+            if confirmed:
+                os.remove(obj)
 
 def cmd_ls(args, options):
     """Prints sorted list of source-files in kernel_path."""
