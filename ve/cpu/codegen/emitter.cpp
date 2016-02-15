@@ -459,11 +459,6 @@ string Emitter::generate_source(bool offload)
     krn["HEAD"]    += unpack_buffers();
     krn["HEAD"]    += unpack_arguments();
 
-    krn["HEAD"]  += _declare_init(
-        _const(_int64()),
-        "inner_dim",
-        _sub(iterspace().ndim(), "1")
-    ) + _end();
 
     krn["BODY"]    = "";
 
