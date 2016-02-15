@@ -450,7 +450,7 @@ string Emitter::generate_source(bool offload)
     krn["NINSTR"]          = to_string(block().ntacs());
     krn["NARRAY_INSTR"]    = to_string(block().narray_tacs());
     krn["NARGS"]           = to_string(block().noperands());
-    //krn["NARRAY_ARGS"]     = to_string(kernel_.operands().size());    // Add this
+    krn["NARRAY_ARGS"]     = to_string(operands_.size());
     krn["OMASK"]           = omask_text(block().omask());
     krn["SYMBOL_TEXT"]     = block().symbol_text();
     krn["SYMBOL"]          = block().symbol();
