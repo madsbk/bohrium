@@ -46,8 +46,9 @@ static bh_component myself;
 static kp::engine::Engine* engine = NULL;
 
 // Timing ID for timing of execute()
-static bh_intp exec_timing;
-static bool timing;
+static bh_intp exec_timer;
+static bool exec_timing;
+static int64_t exec_profiling;
 static size_t exec_count = 0;
 static map<bh_opcode, bh_extmethod_impl> extensions;
 
@@ -80,7 +81,7 @@ bh_error bh_ve_cpu_init(const char *name)
     //  Get engine parameters
     //
     bh_intp bind;
-    bh_intp vcache_size;
+    bh_intp vcache;
     bool preload;
 
     bh_intp jit_level;
@@ -98,10 +99,11 @@ bh_error bh_ve_cpu_init(const char *name)
     char* template_path = NULL;
     char* kernel_path = NULL;
 
-    if ((BH_SUCCESS!=bh_component_config_bool_option(&myself, "timing", &timing))                   or \
-        (BH_SUCCESS!=bh_component_config_int_option(&myself, "bind", 0, 2, &bind))                  or \
-        (BH_SUCCESS!=bh_component_config_int_option(&myself, "vcache_size", 0, 100, &vcache_size))  or \
-        (BH_SUCCESS!=bh_component_config_bool_option(&myself, "preload", &preload))                 or \
+    if ((BH_SUCCESS!=bh_component_config_bool_option(&myself, "exec_timing", &exec_timing)) or \
+        (BH_SUCCESS!=bh_component_config_int_option(&myself, "exec_profiling", 0, 2, &exec_profiling)) or \
+        (BH_SUCCESS!=bh_component_config_int_option(&myself, "rt_bind", 0, 2, &bind)) or \
+        (BH_SUCCESS!=bh_component_config_int_option(&myself, "rt_vcache", 0, 100, &vcache)) or \
+        (BH_SUCCESS!=bh_component_config_bool_option(&myself, "jit_preload", &preload))                 or \
         (BH_SUCCESS!=bh_component_config_int_option(&myself, "jit_level", 0, 3, &jit_level))        or \
         (BH_SUCCESS!=bh_component_config_bool_option(&myself, "jit_nested",  &jit_nested))        or \
         (BH_SUCCESS!=bh_component_config_bool_option(&myself, "jit_dumpsrc", &jit_dumpsrc))         or \
@@ -118,8 +120,8 @@ bh_error bh_ve_cpu_init(const char *name)
     }
 
     // Initialize execute(...) timer
-    if (timing) {
-        exec_timing = bh_timer_new("[VE-CPU] Execution");
+    if (exec_timing) {
+        exec_timer = bh_timer_new("[VE-CPU] Execution");
     }
 
     //
@@ -183,7 +185,7 @@ bh_error bh_ve_cpu_init(const char *name)
     // VROOM VROOM VROOOOOOMMMM!!! VROOOOM!!
     engine = new kp::engine::Engine(
         (kp_thread_binding)bind,
-        (size_t)vcache_size,
+        (size_t)vcache,
         preload,
         jit_enabled,
         jit_nested,
@@ -212,7 +214,7 @@ bh_error bh_ve_cpu_init(const char *name)
 bh_error bh_ve_cpu_execute(bh_ir* bhir)
 {
     bh_uint64 timestamp = 0;
-    if (timing) {
+    if (exec_timing) {
         timestamp = bh_timer_stamp();
     }
     bh_error res = BH_SUCCESS;
@@ -239,9 +241,15 @@ bh_error bh_ve_cpu_execute(bh_ir* bhir)
         block.clear();                                          // Reset the block
         block.compose(*krnl, (bool)engine->jit_contraction());  // Compose it based on kernel
 
-        TIMER_DETAILED
+        if (exec_profiling>1) {
+            //TIMER_DETAILED
+            kp::core::Timevault::instance().set_detailed(true);
+        }
         if ((block.omask() & KP_EXTENSION)>0) {         // Extension-Instruction-Execute (EIE)
-            TIMER_START
+            if (exec_profiling) {
+                //TIMER_START
+                kp::core::Timevault::instance().start();
+            }
             kp_tac& tac = block.tac(0);
             map<bh_opcode, bh_extmethod_impl>::iterator ext;
             ext = extensions.find(static_cast<bh_instruction*>(tac.ext)->opcode);
@@ -253,15 +261,28 @@ bh_error bh_ve_cpu_execute(bh_ir* bhir)
                     return res;
                 }
             }
-            TIMER_STOP(block.text_compact());
+            if (exec_profiling) {
+                //TIMER_STOP(block.text_compact());
+                kp::core::Timevault::instance().store(
+                    block.text_compact(),
+                    kp::core::Timevault::instance().stop()
+                );
+            }
         } else if ((engine->jit_fusion()) ||
                    (block.narray_tacs() == 0)) {        // Multi-Instruction-Execute (MIE)
             DEBUG(TAG, "Multi-Instruction-Execute BEGIN");
-
-            TIMER_START
+            if (exec_profiling) {
+                //TIMER_START
+                kp::core::Timevault::instance().start();
+            }
             res = engine->process_block(tac_program, symbol_table, block);
-            TIMER_STOP(block.text_compact());
-
+            if (exec_profiling) {
+                //TIMER_STOP(block.text_compact());
+                kp::core::Timevault::instance().store(
+                    block.text_compact(),
+                    kp::core::Timevault::instance().stop()
+                );
+            }
             if (BH_SUCCESS != res) {
                 return res;
             }
@@ -275,10 +296,18 @@ bh_error bh_ve_cpu_execute(bh_ir* bhir)
                 block.clear();                          // Reset the block
                 block.compose(*krnl, (size_t)*idx_it);  // Compose based on a single instruction
 
-                TIMER_START
+                if (exec_profiling) {
+                    //TIMER_START
+                    kp::core::Timevault::instance().start();
+                }
                 res = engine->process_block(tac_program, symbol_table, block);
-                TIMER_STOP(block.text_compact());
-
+                if (exec_profiling) {
+                    //TIMER_STOP(block.text_compact());
+                    kp::core::Timevault::instance().store(
+                        block.text_compact(),
+                        kp::core::Timevault::instance().stop()
+                    );
+                }
                 if (BH_SUCCESS != res) {
                     return res;
                 }
@@ -287,8 +316,8 @@ bh_error bh_ve_cpu_execute(bh_ir* bhir)
         }
     }
 
-    if (timing) {
-        bh_timer_add(exec_timing, timestamp, bh_timer_stamp());
+    if (exec_timing) {
+        bh_timer_add(exec_timer, timestamp, bh_timer_stamp());
     }
 
     return res;
@@ -302,8 +331,8 @@ bh_error bh_ve_cpu_shutdown(void)
     delete engine;
     engine = NULL;
 
-    if (timing) {
-        bh_timer_finalize(exec_timing);
+    if (exec_timing) {
+        bh_timer_finalize(exec_timer);
     }
 
     return BH_SUCCESS;

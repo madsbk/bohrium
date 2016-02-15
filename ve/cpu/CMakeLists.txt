@@ -13,11 +13,6 @@ endif()
 #
 #   Internal code, libraries, and macros
 #
-if (VE_CPU_PROFILING)                                   # Engine profiling MACRO
-    message(STATUS "VE-CPU: Enabling CPU profiling.")
-    add_definitions( -DVE_CPU_PROFILING )
-endif()
-
 if (VE_CPU_DEBUGGING)                                   # Engine debugging MACRO
     message(STATUS "VE-CPU: Enabling debugging.")
     add_definitions( -DVE_CPU_DEBUGGING )
@@ -127,7 +122,7 @@ if (HWLOC_FOUND)                                                    # Enable HWL
     target_link_libraries(kp ${HWLOC_LIBRARY})
 endif()
 
-set(VE_CPU_BIND "0")
+set(VE_CPU_RT_BIND "0")
 if (OPENACC_FOUND)                                                  # OpenACC
 
     add_definitions(-DCAPE_WITH_OPENACC)
@@ -139,7 +134,7 @@ elseif(OPENMP_FOUND)                                                # OpenMP
     add_definitions(-DCAPE_WITH_OPENMP)
     if (HWLOC_FOUND)                                                # We have both OpenMP and HWLOC..
         add_definitions(-DCAPE_WITH_THREADBINDING)
-        set(VE_CPU_BIND "1")
+        set(VE_CPU_RT_BIND "1")
     endif()                                                         # .. so we enable thread-binding.
 
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")         # Enable compilation with OpenMP
@@ -249,29 +244,29 @@ else()
     endif()
 endif()
 
-set(VE_CPU_PROFILING    false   CACHE BOOL                                                  "VE-CPU: Enabling CPU profiling.")
-set(VE_CPU_DEBUGGING    false   CACHE BOOL                                                  "VE-CPU: Enable debugging.")
-set(VE_CPU_TIMING       false   CACHE BOOL                                                  "VE-CPU: Enabled timing.")
-set(VE_CPU_BIND         "${VE_CPU_BIND}"     CACHE STRING                                   "VE-CPU: Threadbinding: 0,1,2 (auto)")
-set(VE_CPU_VCACHE_SIZE  "10"    CACHE STRING                                                "VE-CPU: Victim cache size")
-set(VE_CPU_PRELOAD      true    CACHE BOOL                                                  "VE-CPU: Preload JIT objects")
+set(VE_CPU_DEBUGGING false CACHE BOOL "VE-CPU: Enable debugging.")
+set(VE_CPU_EXEC_TIMING false CACHE BOOL "VE-CPU: Enabled timing.")
+set(VE_CPU_EXEC_PROFILING "0" CACHE STRING "VE-CPU: Kernel profiling - 0=off,1=summary,2=detailed.")
+set(VE_CPU_RT_BIND "${VE_CPU_RT_BIND}" CACHE STRING "VE-CPU: Threadbinding: 0=off,1,2=auto")
+set(VE_CPU_RT_VCACHE "10" CACHE STRING "VE-CPU: Victim cache size")
 
-set(VE_CPU_JIT_LEVEL    "3"     CACHE STRING                                                "VE-CPU: JIT level, 0=Disabled, 1=Fusion, 2=Fusion+Contraction")
-set(VE_CPU_JIT_NESTED   false   CACHE BOOL                                                "VE-CPU: JIT nested codegen, false=Disabled, true=enabled")
-set(VE_CPU_JIT_DUMPSRC  true    CACHE BOOL                                                "VE-CPU: Dump generated code to filesystem.")
-set(VE_CPU_JIT_OFFLOAD  "${VE_CPU_JIT_OFFLOAD}"     CACHE STRING                                                "VE-CPU: Offloading: 0,1,2 (auto)")
+set(VE_CPU_JIT_PRELOAD true CACHE BOOL "VE-CPU: Preload JIT objects")
+set(VE_CPU_JIT_LEVEL "3" CACHE STRING "VE-CPU: JIT level, 0=Disabled, 1=Fusion, 2=Fusion+Contraction")
+set(VE_CPU_JIT_NESTED false CACHE BOOL "VE-CPU: JIT nested codegen, false=Disabled, true=enabled")
+set(VE_CPU_JIT_DUMPSRC true CACHE BOOL "VE-CPU: Dump generated code to filesystem.")
+set(VE_CPU_JIT_OFFLOAD "${VE_CPU_JIT_OFFLOAD}" CACHE STRING "VE-CPU: Offloading: 0,1,2 (auto)")
 
-set(VE_CPU_COMPILER_CMD "${CMAKE_C_COMPILER}"       CACHE STRING                            "VE-CPU: JIT-Compiler")
+set(VE_CPU_COMPILER_CMD "${CMAKE_C_COMPILER}" CACHE STRING "VE-CPU: JIT-Compiler")
 set(VE_CPU_COMPILER_INC "-I${CMAKE_INSTALL_PREFIX}/include")
 set(VE_CPU_COMPILER_INC "${VE_CPU_COMPILER_INC} -I${CMAKE_INSTALL_PREFIX}/include/bohrium")
 set(VE_CPU_COMPILER_INC "${VE_CPU_COMPILER_INC} -I${CMAKE_INSTALL_PREFIX}/share/bohrium/include")
-set(VE_CPU_COMPILER_INC "${VE_CPU_COMPILER_INC}"    CACHE STRING                            "VE-CPU: JIT-Compiler includes")
-set(VE_CPU_COMPILER_LIB "-lm"                       CACHE STRING                            "VE-CPU: JIT-Compiler libraries")
-set(VE_CPU_COMPILER_FLG "${VE_CPU_COMPILER_FLG}"    CACHE STRING                            "VE-CPU: JIT-Compiler flags")
+set(VE_CPU_COMPILER_INC "${VE_CPU_COMPILER_INC}" CACHE STRING "VE-CPU: JIT-Compiler includes")
+set(VE_CPU_COMPILER_LIB "-lm" CACHE STRING "VE-CPU: JIT-Compiler libraries")
+set(VE_CPU_COMPILER_FLG "${VE_CPU_COMPILER_FLG}" CACHE STRING "VE-CPU: JIT-Compiler flags")
 
-set(VE_CPU_OBJECT_PATH      "${CMAKE_INSTALL_PREFIX}/var/bohrium/objects" CACHE STRING      "VE-CPU: JIT-Compiler object path")
-set(VE_CPU_TEMPLATE_PATH    "${CMAKE_INSTALL_PREFIX}/share/bohrium/templates" CACHE STRING  "VE-CPU: JIT-Compiler codegen templates")
-set(VE_CPU_KERNEL_PATH      "${CMAKE_INSTALL_PREFIX}/var/bohrium/kernels" CACHE STRING      "VE-CPU: JIT-Compiler where codegen is dumped")
+set(VE_CPU_OBJECT_PATH "${CMAKE_INSTALL_PREFIX}/var/bohrium/objects" CACHE STRING "VE-CPU: JIT-Compiler object path")
+set(VE_CPU_TEMPLATE_PATH "${CMAKE_INSTALL_PREFIX}/share/bohrium/templates" CACHE STRING "VE-CPU: JIT-Compiler codegen templates")
+set(VE_CPU_KERNEL_PATH "${CMAKE_INSTALL_PREFIX}/var/bohrium/kernels" CACHE STRING "VE-CPU: JIT-Compiler where codegen is dumped")
 
 feature_summary(WHAT ALL)
 
