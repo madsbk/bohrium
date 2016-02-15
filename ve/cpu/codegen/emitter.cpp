@@ -1,4 +1,5 @@
 #include <sstream>
+#include <set>
 #include "utils.hpp"
 #include "codegen.hpp"
 
@@ -467,9 +468,21 @@ string Emitter::axis_access(int64_t glb_idx, int64_t axis)
 
 string Emitter::generate_source(bool offload)
 {
+    if ((omask() & KP_ARRAY_OPS)==0) { // There must be at lest one array operation
+        cerr << text() << endl;
+        throw runtime_error("No array operations!");
+    }
+    if (omask() & KP_EXTENSION) {      // Extensions are not allowed.
+        cerr << text() << endl;
+        throw runtime_error("KP_EXTENSION in kernel");
+    }
+
     const uint32_t rank = iterspace().meta().ndim;
+    int64_t axis = rank-1;  // TODO: Decide dynamically
 
     Skeleton krn(plaid_, "skel.kernel");
+    Skeleton loop(plaid_, "skel.loop");
+
     krn["MODE"]            = (block().narray_tacs()>1) ? "FUSED" : "SIJ";
     krn["LAYOUT"]          = layout_text(block().iterspace().layout);
     krn["NINSTR"]          = to_string(block().ntacs());
@@ -486,11 +499,206 @@ string Emitter::generate_source(bool offload)
 
     krn["BODY"]    = "";
 
-    int64_t axis = rank-1;
+
+    // Construct the axis loop
+    loop["INIT"] = _declare_init(_int64(), "idx"+to_string(axis),  "0");
+    loop["COND"] =_lt(
+        "idx"+to_string(axis),
+        "iterspace_shape_d"+ to_string(axis)
+    );
+    loop["INCR"] = _inc("idx" + to_string(axis));
+
+    for(kernel_tac_iter tit=tacs_begin();
+        tit!=tacs_end();
+        ++tit) {
+        kp_tac& tac = **tit;
+        KP_ETYPE etype = (KP_ABSOLUTE == tac.oper) ?  operand_glb(tac.in1).meta().etype : operand_glb(tac.out).meta().etype;
+
+        string out = "ERROR_OUT", in1 = "ERROR_IN1", in2 = "ERROR_IN2";
+        switch(tac.op) {
+        case KP_ZIP:
+            loop["BODY"] += _assign(
+                axis_access(tac.out, axis),
+                oper(
+                    tac.oper,
+                    etype,
+                    axis_access(tac.in1, axis),
+                    axis_access(tac.in2, axis)
+                )
+            );
+            loop["BODY"] += _end(oper_description(tac));
+            break;
+        case KP_MAP:
+            loop["BODY"] += _assign(
+                axis_access(tac.out, axis),
+                oper(
+                    tac.oper,
+                    etype,
+                    axis_access(tac.in1, axis),
+                    ""
+                )
+            );
+            loop["BODY"] += _end(oper_description(tac));
+            break;
+        case KP_GENERATE:
+            loop["BODY"] += _assign(
+                axis_access(tac.out, axis),
+                oper(
+                    tac.oper,
+                    etype,
+                    "",
+                    ""
+                )
+            );
+            loop["BODY"] += _end(oper_description(tac));
+            break;
+
+        case KP_REDUCE_COMPLETE:
+            //
+            // Shared accumulator
+            //
+
+            // Declare and initialize to neutral
+            krn["HEAD"] += _line(_declare_init(
+                operand_glb(tac.in1).etype(),
+                operand_glb(tac.in1).accu_shared(),
+                oper_neutral_element(tac.oper, operand_glb(tac.in1).meta().etype)
+            ));
+
+            // Write accumulator to memory
+            krn["FOOT"] += _line(_assign(
+                _deref(_add(
+                    operand_glb(tac.out).buffer_data(),
+                    operand_glb(tac.out).start()
+                )),
+                operand_glb(tac.in1).accu_shared()
+            ));
+
+            //
+            // Private accumulator
+
+            // Declare and initialize to neutral
+            loop["PROLOG"] += _line(_declare_init(
+                operand_glb(tac.in1).etype(),
+                operand_glb(tac.in1).accu_private(),
+                oper_neutral_element(tac.oper, operand_glb(tac.in1).meta().etype)
+            ));
+            // Update shared accumulator with value of private accumulator
+            loop["EPILOG"] += _assign(
+                operand_glb(tac.in1).accu_shared(),
+                oper(
+                    tac.oper,
+                    operand_glb(tac.in1).meta().etype,
+                    operand_glb(tac.in1).accu_shared(),
+                    operand_glb(tac.in1).accu_private()
+                )
+            )+_end(" Syncing shared <-> private accumultor var");
+            
+            // The reduction operation itself
+            loop["BODY"] += _assign(
+                operand_glb(tac.in1).accu_private(),
+                oper(
+                    tac.oper,
+                    operand_glb(tac.in1).meta().etype,
+                    operand_glb(tac.in1).accu_private(),
+                    axis_access(tac.in1, axis)
+                )
+            );
+            loop["BODY"] += _end(oper_description(tac));
+
+            /*
+            loop["EPILOG"] += _line(synced_oper(
+                tac.oper,
+                operand_glb(tac.in1).meta().etype,
+                operand_glb(tac.in1).accu_shared(),
+                operand_glb(tac.in1).accu_shared(),
+                operand_glb(tac.in1).accu_private()
+            ));
+            */
+
+            break;
+
+        case KP_REDUCE_PARTIAL:
+            break;
+
+        default:
+            loop["BODY"] += "UNSUPPORTED_OPERATION["+ operation_text(tac.op) +"]_AT_EMITTER_STAGE";
+            break;
+        }
+    }
+
+    // Create the prolog and stepping
+
+    for (kernel_operand_iter oit = operands_begin();
+        oit != operands_end();
+        ++oit) {
+
+        Operand& operand = oit->second;
+        bool restrictable = base_refcount(oit->first) == 1;
+        switch(operand.meta().layout) {
+            case KP_SCALAR_CONST:
+                break;
+
+            case KP_SCALAR:
+                loop["PROLOG"] += _declare_init(
+                    operand.etype(),
+                    operand.walker(),
+                    _deref(_add(operand.buffer_data(), operand.start()))
+                );
+                break;
+
+            case KP_SCALAR_TEMP:
+            case KP_CONTRACTABLE:
+                loop["PROLOG"] += _declare(
+                    operand.etype(),
+                    operand.walker()
+                );
+                break;
+
+            case KP_CONTIGUOUS:
+            case KP_CONSECUTIVE:
+            case KP_STRIDED:
+                {
+                    stringstream offset;    // DO: offset += idx*stride for every non-axis dim
+                    for(int64_t dim=0; dim<rank; ++dim) {
+                        if (dim!=axis) {    
+                            offset << " + " << _mul(
+                                operand.strides()+"_d"+to_string(dim),
+                                "idx"+to_string(dim)
+                            );
+                        }
+                    }
+                    // Declare array buffers and add non-axis offsets, + start.
+                    if (restrictable) {     // Annotate *restrict*
+                        loop["PROLOG"] += _declare_init(
+                            _restrict(_ptr(operand.etype())),
+                            operand.walker(),
+                            _add(operand.buffer_data(), operand.start())+offset.str()
+                        );
+                    } else {
+                        loop["PROLOG"] += _declare_init(
+                            _ptr(operand.etype()),
+                            operand.walker(),
+                            _add(operand.buffer_data(), operand.start())+offset.str()
+                        );
+                    }
+                }
+                break;
+
+            case KP_SPARSE:
+                loop["PROLOG"] += _beef("Unimplemented KP_LAYOUT.");
+                break;
+        }
+        loop["PROLOG"] += _end(operand.layout());
+    }
+
+    krn["BODY"] = loop.emit();
 
     for(int64_t idx=rank-1; idx>=0; --idx) {
-
-        Skeleton loop(plaid_, "skel.loop");
+        if (idx==axis) {
+            continue;
+        }
+        loop.reset();   // Clear the skeleton
         loop["INIT"] = _declare_init(_int64(), "idx"+to_string(idx),  "0");
         loop["COND"] =_lt(
             "idx"+to_string(idx),
@@ -500,175 +708,35 @@ string Emitter::generate_source(bool offload)
 
         loop["BODY"] = krn["BODY"];
 
-        if (idx==axis) {
-
-            for(kernel_tac_iter tit=tacs_begin();
-                tit!=tacs_end();
-                ++tit) {
-                kp_tac& tac = **tit;
-                KP_ETYPE etype = (KP_ABSOLUTE == tac.oper) ?  operand_glb(tac.in1).meta().etype :  etype = operand_glb(tac.out).meta().etype;
-
-                string out = "ERROR_OUT", in1 = "ERROR_IN1", in2 = "ERROR_IN2";
-                switch(tac.op) {
-                case KP_MAP:
-                case KP_ZIP:
-                case KP_GENERATE:
-                    loop["BODY"] += _assign(
-                        axis_access(tac.out, idx),
-                        oper(
-                            tac.oper,
-                            etype,
-                            axis_access(tac.in1, idx),
-                            axis_access(tac.in2, idx)
-                        )
-                    );
-                    loop["BODY"] += _end(oper_description(tac));
-                    break;
-
-                case KP_REDUCE_COMPLETE:
-                    // Declare shared acculumation variable
-                    krn["HEAD"] += _line(_declare_init(
-                        operand_glb(tac.in1).etype(),
-                        operand_glb(tac.out).accu_shared(),
-                        oper_neutral_element(tac.oper, operand_glb(tac.in1).meta().etype)
-                    ));
-                    // Declare private acculumation variable
-                    loop["PROLOG"] += _line(_declare_init(
-                        operand_glb(tac.in1).etype(),
-                        operand_glb(tac.out).accu_private(),
-                        oper_neutral_element(tac.oper, operand_glb(tac.in1).meta().etype)
-                    ));
-                    
-                    // The reduction operation itself
-                    loop["BODY"] += _assign(
-                        operand_glb(tac.out).accu_private(),
-                        oper(
-                            tac.oper,
-                            operand_glb(tac.out).meta().etype,
-                            operand_glb(tac.out).accu_private(),
-                            axis_access(tac.in1, idx)
-                        )
-                    );
-                    loop["BODY"] += _end(oper_description(tac));
-
-                    // TODO: Synchronization of shared <-> private accumulation
-
-                    break;
-
-                case KP_REDUCE_PARTIAL:
-                    break;
-
-                default:
-                    loop["BODY"] += "UNSUPPORTED_OPERATION["+ operation_text(tac.op) +"]_AT_EMITTER_STAGE";
-                    break;
-                }
-            }
-            // Create the prolog and stepping
-
-            for (kernel_operand_iter oit = operands_begin();
-                oit != operands_end();
-                ++oit) {
-
-                Operand& operand = oit->second;
-                bool restrictable = base_refcount(oit->first) == 1;
-                switch(operand.meta().layout) {
-                    case KP_SCALAR_CONST:
-                        break;
-
-                    case KP_SCALAR:
-                        loop["PROLOG"] += _declare_init(
-                            operand.etype(),
-                            operand.walker(),
-                            _deref(_add(operand.buffer_data(), operand.start()))
-                        );
-                        break;
-
-                    case KP_SCALAR_TEMP:
-                    case KP_CONTRACTABLE:
-                        loop["PROLOG"] += _declare(
-                            operand.etype(),
-                            operand.walker()
-                        );
-                        break;
-
-                    case KP_CONTIGUOUS:
-                    case KP_CONSECUTIVE:
-                    case KP_STRIDED:
-                        {
-                            stringstream offset;
-                            for(int64_t dim=0; dim<rank; ++dim) {
-                                if (dim!=axis) {
-                                    offset << " + " << _mul(
-                                        operand.strides()+"_d"+to_string(dim),
-                                        "idx"+to_string(dim)
-                                    );
-                                }
-                            }
-                            if (restrictable) {
-                                loop["PROLOG"] += _declare_init(
-                                    _restrict(_ptr(operand.etype())),
-                                    operand.walker(),
-                                    _add(operand.buffer_data(), operand.start())+offset.str()
-                                );
-                            } else {
-                                loop["PROLOG"] += _declare_init(
-                                    _ptr(operand.etype()),
-                                    operand.walker(),
-                                    _add(operand.buffer_data(), operand.start())+offset.str()
-                                );
-                            }
-                        }
-                        break;
-
-                    case KP_SPARSE:
-                        loop["PROLOG"] += _beef("Unimplemented KP_LAYOUT.");
-                        break;
-                }
-                loop["PROLOG"] += _end(operand.layout());
-            }
-        }
-
-        /*
-        for(kernel_tac_iter tit=kernel_.tacs_begin();
-            tit != kernel_.tacs_end();
-            ++tit) {
-            kp_tac& tac = **(tit);
-
-            if ((tac.op & KP_ACCUMULATION)>0) {
-                Operand& out = kernel_.operand_glb(tac.out);
-                Operand& in1 = kernel_.operand_glb(tac.in1);
-                if (in1.meta().ndim == (idx+1)) {
-                    krn["HEAD"] += _line(_declare_init(
-                        in1.etype(),
-                        out.accu_shared(),
-                        oper_neutral_element(tac.oper, in1.meta().etype)
-                    ));
-                    krn["FOOT"] += _line(synced_oper(
-                        tac.oper,
-                        in1.meta().etype,
-                        out.accu_shared(),
-                        out.accu_shared(),
-                        out.accu_private()
-                    ));
-
-                    loop["PROLOG"] += _line(_declare_init(
-                        in1.etype(),
-                        out.accu_private(),
-                        oper_neutral_element(tac.oper, in1.meta().etype)
-                    ));
-                    loop["EPILOG"] += _line(synced_oper(
-                        tac.oper,
-                        in1.meta().etype,
-                        out.accu_shared(),
-                        out.accu_shared(),
-                        out.accu_private()
-                    ));
-                }
-            }
-        }
-        */
-
         krn["BODY"] = loop.emit();
+    }
+
+    set<uint64_t> written;  // Write scalars back to memory
+    for(kernel_tac_iter tit=tacs_begin();
+        tit!=tacs_end();
+        ++tit) {
+        kp_tac & tac = **tit;
+
+        Operand& opd = operand_glb(tac.out);
+        if (((tac.op & (KP_MAP | KP_ZIP | KP_GENERATE))>0) and \
+            ((opd.meta().layout & KP_SCALAR)>0) and \
+            (written.find(tac.out)==written.end())) {
+            krn["FOOT"] += _line(_assign(
+                _deref(_add(opd.buffer_data(), opd.start())),
+                opd.walker_val()
+            ));
+            written.insert(tac.out);
+        }
+    }
+
+    // Scalar kernel. We extract the body and prolog of the "loop"
+    if ((iterspace().meta().layout & (KP_SCALAR))>0) {
+        Skeleton code_block(plaid_, "skel.block");
+
+        code_block["HEAD"] = loop["PROLOG"];
+        code_block["BODY"] = loop["BODY"];
+
+        krn["BODY"] = code_block.emit();
     }
 
     string src = krn.emit();
