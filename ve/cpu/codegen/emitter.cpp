@@ -225,7 +225,8 @@ string Emitter::oper(KP_OPERATOR oper, KP_ETYPE etype, string in1, string in2)
                 default:            return _pow(in1, in2);
             }
         case KP_RANDOM:                return _random(in1, in2);
-        case KP_RANGE:                 return _range();
+        //case KP_RANGE:                 return _range();
+        case KP_RANGE:                 return "idx0";
         case KP_REAL:
             switch(etype) {
                 case KP_FLOAT32:       return _crealf(in1);
@@ -440,6 +441,30 @@ kernel_tac_iter Emitter::tacs_end(void)
     return tacs_.end();
 }
 
+string Emitter::axis_access(int64_t glb_idx, int64_t axis)
+{
+    stringstream ss;
+
+    switch(operand_glb(glb_idx).meta().layout) {
+    case KP_STRIDED:
+    case KP_CONTIGUOUS:
+    case KP_CONSECUTIVE:
+        ss << _index(
+            operand_glb(glb_idx).walker(),
+            _mul(
+                "idx"+to_string(axis),
+                operand_glb(glb_idx).strides()+"_d"+to_string(axis)
+            )
+        );
+        break;
+    default:
+        ss << operand_glb(glb_idx).name();
+        break;
+    }
+
+    return ss.str();
+}
+
 string Emitter::generate_source(bool offload)
 {
     const uint32_t rank = iterspace().meta().ndim;
@@ -459,10 +484,7 @@ string Emitter::generate_source(bool offload)
     krn["HEAD"]    += unpack_buffers();
     krn["HEAD"]    += unpack_arguments();
 
-
     krn["BODY"]    = "";
-
-    Skeleton loop(plaid_, "skel.loop");
 
     int64_t axis = rank-1;
 
@@ -483,84 +505,62 @@ string Emitter::generate_source(bool offload)
             for(kernel_tac_iter tit=tacs_begin();
                 tit!=tacs_end();
                 ++tit) {
-                kp_tac & tac = **tit;
-                KP_ETYPE etype;
-                if (KP_ABSOLUTE == tac.oper) {
-                    etype = operand_glb(tac.in1).meta().etype;
-                } else {
-                    etype = operand_glb(tac.out).meta().etype;
-                }
+                kp_tac& tac = **tit;
+                KP_ETYPE etype = (KP_ABSOLUTE == tac.oper) ?  operand_glb(tac.in1).meta().etype :  etype = operand_glb(tac.out).meta().etype;
 
                 string out = "ERROR_OUT", in1 = "ERROR_IN1", in2 = "ERROR_IN2";
                 switch(tac.op) {
-                    case KP_MAP:
-                    case KP_ZIP:
-                    case KP_GENERATE:
-                        switch(tac_noperands(tac)) {
-                            case 3:
-                                switch(operand_glb(tac.in2).meta().layout) {
-                                case KP_STRIDED:
-                                case KP_CONTIGUOUS:
-                                case KP_CONSECUTIVE:
-                                    in2 = _index(                                    
-                                        operand_glb(tac.in2).walker(),
-                                        _mul(
-                                            "idx"+to_string(idx),
-                                            operand_glb(tac.in2).strides()+"_d"+to_string(idx)
-                                        )
-                                    );
-                                    break;
-                                default:
-                                    in2 = operand_glb(tac.in2).name();
-                                    break;
-                                }
-                            case 2:
-                                switch(operand_glb(tac.in1).meta().layout) {
-                                case KP_STRIDED:
-                                case KP_CONTIGUOUS:
-                                case KP_CONSECUTIVE:
-                                    in1 = _index(                                    
-                                        operand_glb(tac.in1).walker(),
-                                        _mul(
-                                            "idx"+to_string(idx),
-                                            operand_glb(tac.in1).strides()+"_d"+to_string(idx)
-                                        )
-                                    );
-                                    break;
-                                default:
-                                    in1 = operand_glb(tac.in1).name();
-                                    break;
-                                }
-                            case 1:
-                                switch(operand_glb(tac.out).meta().layout) {
-                                case KP_STRIDED:
-                                case KP_CONTIGUOUS:
-                                case KP_CONSECUTIVE:
-                                    out = _index(                                    
-                                        operand_glb(tac.out).walker(),
-                                        _mul(
-                                            "idx"+to_string(idx),
-                                            operand_glb(tac.out).strides()+"_d"+to_string(idx)
-                                        )
-                                    );
-                                    break;
-                                default:
-                                    out = operand_glb(tac.out).name();
-                                    break;
-                                }
-                            default:
-                                break;
-                        }
-                        loop["BODY"] += _assign(
-                            out,
-                            oper(tac.oper, etype, in1, in2)
-                        );
-                        loop["BODY"] += _end(oper_description(tac));
-                        break;
+                case KP_MAP:
+                case KP_ZIP:
+                case KP_GENERATE:
+                    loop["BODY"] += _assign(
+                        axis_access(tac.out, idx),
+                        oper(
+                            tac.oper,
+                            etype,
+                            axis_access(tac.in1, idx),
+                            axis_access(tac.in2, idx)
+                        )
+                    );
+                    loop["BODY"] += _end(oper_description(tac));
+                    break;
 
-                    default:
-                        loop["BODY"] += "UNSUPPORTED_OPERATION["+ operation_text(tac.op) +"]_AT_EMITTER_STAGE";
-                        break;
+                case KP_REDUCE_COMPLETE:
+                    // Declare shared acculumation variable
+                    krn["HEAD"] += _line(_declare_init(
+                        operand_glb(tac.in1).etype(),
+                        operand_glb(tac.out).accu_shared(),
+                        oper_neutral_element(tac.oper, operand_glb(tac.in1).meta().etype)
+                    ));
+                    // Declare private acculumation variable
+                    loop["PROLOG"] += _line(_declare_init(
+                        operand_glb(tac.in1).etype(),
+                        operand_glb(tac.out).accu_private(),
+                        oper_neutral_element(tac.oper, operand_glb(tac.in1).meta().etype)
+                    ));
+                    
+                    // The reduction operation itself
+                    loop["BODY"] += _assign(
+                        operand_glb(tac.out).accu_private(),
+                        oper(
+                            tac.oper,
+                            operand_glb(tac.out).meta().etype,
+                            operand_glb(tac.out).accu_private(),
+                            axis_access(tac.in1, idx)
+                        )
+                    );
+                    loop["BODY"] += _end(oper_description(tac));
+
+                    // TODO: Synchronization of shared <-> private accumulation
+
+                    break;
+
+                case KP_REDUCE_PARTIAL:
+                    break;
+
+                default:
+                    loop["BODY"] += "UNSUPPORTED_OPERATION["+ operation_text(tac.op) +"]_AT_EMITTER_STAGE";
+                    break;
                 }
             }
             // Create the prolog and stepping
@@ -594,34 +594,36 @@ string Emitter::generate_source(bool offload)
                     case KP_CONTIGUOUS:
                     case KP_CONSECUTIVE:
                     case KP_STRIDED:
-                        if (restrictable) {
-                            loop["PROLOG"] += _declare_init(
-                                _restrict(_ptr(operand.etype())),
-                                operand.walker(),
-                                _add(operand.buffer_data(), operand.start())
-                            );
-                        } else {
-                            loop["PROLOG"] += _declare_init(
-                                _ptr(operand.etype()),
-                                operand.walker(),
-                                _add(operand.buffer_data(), operand.start())
-                            );
+                        {
+                            stringstream offset;
+                            for(int64_t dim=0; dim<rank; ++dim) {
+                                if (dim!=axis) {
+                                    offset << " + " << _mul(
+                                        operand.strides()+"_d"+to_string(dim),
+                                        "idx"+to_string(dim)
+                                    );
+                                }
+                            }
+                            if (restrictable) {
+                                loop["PROLOG"] += _declare_init(
+                                    _restrict(_ptr(operand.etype())),
+                                    operand.walker(),
+                                    _add(operand.buffer_data(), operand.start())+offset.str()
+                                );
+                            } else {
+                                loop["PROLOG"] += _declare_init(
+                                    _ptr(operand.etype()),
+                                    operand.walker(),
+                                    _add(operand.buffer_data(), operand.start())+offset.str()
+                                );
+                            }
                         }
-
-                        /*
-                        loop["FOOT"] += _add_assign(
-                                operand.walker(),
-                                operand.strides()+"_d"+to_string(idx)
-                            );
-                        loop["FOOT"] += _end();
-                        */
                         break;
 
                     case KP_SPARSE:
                         loop["PROLOG"] += _beef("Unimplemented KP_LAYOUT.");
                         break;
                 }
-                //loop["FOOT"] += _end(operand.layout());
                 loop["PROLOG"] += _end(operand.layout());
             }
         }
@@ -670,12 +672,6 @@ string Emitter::generate_source(bool offload)
     }
 
     string src = krn.emit();
-
-    core::write_file(                           // Dump to file
-        "/tmp/"+block().symbol()+".c",
-        src.c_str(), 
-        src.size()
-    );
 
     return src;
 }

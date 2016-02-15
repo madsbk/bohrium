@@ -441,6 +441,8 @@ public:
     
     std::string generate_source(bool offload);
 
+    std::string axis_access(int64_t glb_idx, int64_t axis);
+
     uint64_t noperands(void);
     Operand& operand_glb(uint64_t gidx);
     Operand& operand_lcl(uint64_t lidx);
