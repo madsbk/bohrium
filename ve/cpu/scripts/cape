@@ -97,11 +97,14 @@ def get_options(conf_path=None, section="cpu", areas=None):
 
     if conf_path is None:
         conf_path = os.sep.join(["$HOME", ".bohrium", "config.ini"])
+    conf_path = os.path.expandvars(os.path.expanduser(conf_path))
+
+    if not os.path.exists(conf_path):
+        Msg.fail("Cannot load options from configuration file %s." % conf_path)
+        return None
 
     if areas is None:
         areas = ["compiler_", "_path"]
-
-    conf_path = os.path.expandvars(os.path.expanduser(conf_path))
 
     conf = ConfigParser.ConfigParser()
     conf.read(conf_path)
@@ -303,9 +306,9 @@ def main():
         sys.exit(1)
 
     options = get_options() # Grab options from configuration file
-
-    args = parser.parse_args()  # Parse arguments
-    args.func(args, options)    # Call command "cmd_*(args, options)"
-
+    if options:
+        args = parser.parse_args()  # Parse arguments
+        args.func(args, options)    # Call command "cmd_*(args, options)"
+       
 if __name__ == "__main__":
     main()

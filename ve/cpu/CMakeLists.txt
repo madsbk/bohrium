@@ -186,7 +186,11 @@ install(
     FILES kp.h
     DESTINATION include/bohrium/
     COMPONENT bohrium)                      # INSTALL CAPE C Header / Data-structures
-
+install(
+    FILES scripts/cape
+    COMPONENT bohrium
+    DESTINATION bin
+    PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 file(MAKE_DIRECTORY kernels)                # INSTALL directory structure and set permissions
 file(MAKE_DIRECTORY objects)
 file(MAKE_DIRECTORY scripts)
