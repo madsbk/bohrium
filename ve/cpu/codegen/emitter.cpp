@@ -593,7 +593,37 @@ string Emitter::generate_source(bool offload)
                     operand_glb(tac.in1).accu_private()
                 )
             )+_end(" Syncing shared <-> private accumultor var");
+            /*
+            loop["EPILOG"] += _line(synced_oper(
+                tac.oper,
+                operand_glb(tac.in1).meta().etype,
+                operand_glb(tac.in1).accu_shared(),
+                operand_glb(tac.in1).accu_shared(),
+                operand_glb(tac.in1).accu_private()
+            ));
+            */
             
+            // The reduction operation itself
+
+            loop["BODY"] += _assign(
+                operand_glb(tac.in1).accu_private(),
+                oper(
+                    tac.oper,
+                    operand_glb(tac.in1).meta().etype,
+                    operand_glb(tac.in1).accu_private(),
+                    axis_access(tac.in1, axis)
+                )
+            );
+            loop["BODY"] += _end(oper_description(tac));
+            break;
+
+        case KP_REDUCE_PARTIAL:
+            // Declare and initialize private accumulator to neutral
+            loop["PROLOG"] += _line(_declare_init(
+                operand_glb(tac.in1).etype(),
+                operand_glb(tac.in1).accu_private(),
+                oper_neutral_element(tac.oper, operand_glb(tac.in1).meta().etype)
+            ));
             // The reduction operation itself
             loop["BODY"] += _assign(
                 operand_glb(tac.in1).accu_private(),
@@ -605,20 +635,11 @@ string Emitter::generate_source(bool offload)
                 )
             );
             loop["BODY"] += _end(oper_description(tac));
-
-            /*
-            loop["EPILOG"] += _line(synced_oper(
-                tac.oper,
-                operand_glb(tac.in1).meta().etype,
-                operand_glb(tac.in1).accu_shared(),
-                operand_glb(tac.in1).accu_shared(),
+            // TODO: update this when out can be intermediate
+            loop["EPILOG"] += _assign(
+                _deref(operand_glb(tac.out).walker()),
                 operand_glb(tac.in1).accu_private()
-            ));
-            */
-
-            break;
-
-        case KP_REDUCE_PARTIAL:
+            )+_end(" Write accumulated variable to array.");
             break;
 
         default:
