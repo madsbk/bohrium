@@ -67,7 +67,6 @@ benchmark/CIL/Csharp/blackscholes/bin
 benchmark/CIL/Csharp/blackscholes/obj
 benchmark/CIL/Csharp/jacobi/bin
 benchmark/CIL/Csharp/jacobi/obj
-bridge/c/codegen/output/
 vem/proxy/bh_proxy_client
 build
 ve/cpu/precompiler.dSYM
@@ -86,3 +85,4 @@ bridge/NumCIL/NumCIL/UFunc/TypedApplyNullary.cs
 bridge/NumCIL/NumCIL/UFunc/TypedApplyUnary.cs
 bridge/NumCIL/NumCIL/UFunc/TypedAggregate.cs
 bridge/NumCIL/NumCIL/UFunc/TypedReduce.cs
+BohriumDataAccessorTyped.cs

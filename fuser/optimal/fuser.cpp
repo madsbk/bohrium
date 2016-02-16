@@ -30,6 +30,7 @@ If not, see <http://www.gnu.org/licenses/>.
 #include <boost/range/adaptors.hpp>
 #include <boost/thread.hpp>
 #include <boost/lexical_cast.hpp>
+#include <regex>
 #include <vector>
 #include <map>
 #include <iterator>
@@ -229,7 +230,7 @@ pair<int64_t,bool> fuse_mask(int64_t best_cost, const vector<EdgeW> &edges2explo
 
 /* Find the optimal solution through branch and bound */
 void branch_n_bound(bh_ir &bhir, GraphDW &dag, const vector<EdgeW> &edges2explore,
-                      const vector<bool> &init_mask, unsigned int init_offset=0)
+                    const vector<bool> &init_mask, unsigned int init_offset=0)
 {
     //We use the greedy algorithm to find a good initial guess
     int64_t best_cost;
@@ -240,7 +241,7 @@ void branch_n_bound(bh_ir &bhir, GraphDW &dag, const vector<EdgeW> &edges2explor
         best_dag = new_dag.bglD();
         best_cost = dag_cost(best_dag);
     }
-    double purge_count=0;
+    uint64_t purge_count=0;
     uint64_t explore_count=0;
 
     TaskQueue tasks(omp_get_max_threads());
@@ -267,15 +268,14 @@ void branch_n_bound(bh_ir &bhir, GraphDW &dag, const vector<EdgeW> &edges2explor
         {
             #pragma omp critical
             {
-                cout << "[" << explore_count << "][";
+                cout << "[" << (double) explore_count << "][";
                 BOOST_FOREACH(bool b, mask)
                 {
                     if(b){cout << "1";}else{cout << "0";}
                 }
-                cout << "] purge count: ";
-                cout << purge_count << " / " << pow(2.0, (int)mask.size());
-                cout << ", cost: " << cost << ", best_cost: " << best_cost;
-                cout << ", fusibility: " << fusibility << endl;
+                cout << "] search: ";
+                cout << (double) explore_count + purge_count << " / " << pow(2.0, (int)mask.size());
+                cout << ", purged: " << (double) purge_count << ", best_cost: " << best_cost << endl;
             }
         }
         #pragma omp critical
@@ -284,7 +284,7 @@ void branch_n_bound(bh_ir &bhir, GraphDW &dag, const vector<EdgeW> &edges2explor
         if(cost >= best_cost)
         {
             #pragma omp critical
-            purge_count += pow(2.0, (int)(mask.size()-offset));
+            purge_count += pow(2.0, (int)(mask.size()-offset))-1;
             continue;
         }
         if(fusibility)
@@ -380,10 +380,41 @@ void fuse_optimal(bh_ir &bhir, GraphDW &dag)
     branch_n_bound(bhir, dag, edges2explore, mask, preload_offset);
 }
 
+static uint64_t bhir_count=0;
+static void manual_merges(GraphDW &dag)
+{
+    const char *t = getenv("BH_FUSER_OPTIMAL_MERGE");
+    if(t == NULL)
+        return;
+    string s = string(t);
+
+    std::smatch sm;
+    std::regex e("\\s*(\\d+):(\\d+)\\+(\\d+),*\\s*");
+    while(std::regex_search(s,sm,e))
+    {
+        assert(sm.size() == 4);
+        int dag_id = stoi(sm[1]);
+        int v1 = stoi(sm[2]);
+        int v2 = stoi(sm[3]);
+        if(dag_id == (int)bhir_count)
+        {
+            cout << "FUSER-OPTIMAL: manual merge of (" << v1 << ", " << v2 << ") in dag " \
+                 << dag_id << endl;
+            dag.merge_vertices_by_id(v1,v2);
+        }
+        s = sm.suffix().str();//Iterate to the next match
+    }
+    dag.remove_cleared_vertices();
+}
+
 void do_fusion(bh_ir &bhir)
 {
     GraphDW dag;
     from_bhir(bhir, dag);
+    fuse_gently(dag);
+
+    manual_merges(dag);
+
     vector<GraphDW> dags;
     split(dag, dags);
     assert(dag_validate(bhir, dags));
@@ -400,6 +431,7 @@ void do_fusion(bh_ir &bhir)
 
 void fuser(bh_ir &bhir, FuseCache &cache)
 {
+    ++bhir_count;
     if(bhir.kernel_list.size() != 0)
         throw logic_error("The kernel_list is not empty!");
 

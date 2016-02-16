@@ -442,6 +442,12 @@ uint64_t bh_ir_kernel::cost() const
     return bohrium::kernel_cost(*this);
 }
 
+/* Returns the cost of the kernel using the unique views cost model */
+uint64_t bh_ir_kernel::cost_unique_views() const
+{
+    return bohrium::kernel_cost_unique_views(*this);
+}
+
 /* Returns the cost savings of merging with the 'other' kernel.
  * The cost savings is defined as the amount the BhIR will drop
  * in price if the two kernels are fused.
@@ -475,3 +481,13 @@ int64_t bh_ir_kernel::merge_cost_savings(const bh_ir_kernel &other) const
     }
     return bohrium::cost_savings(*b, *a);
 }
+
+// We use the current lowest instruction index in '_instr_indexes'
+// as kernel ID. Empty kernels have ID '-1'
+int64_t bh_ir_kernel::id() const
+{
+    if(_instr_indexes.size() == 0)
+        return -1;
+    return *std::min_element(_instr_indexes.begin(), _instr_indexes.end());
+}
+

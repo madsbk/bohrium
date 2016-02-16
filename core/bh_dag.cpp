@@ -35,6 +35,7 @@ If not, see <http://www.gnu.org/licenses/>.
 #include <stdexcept>
 #include <bh_dag.h>
 #include "bh_fuse.h"
+#include "bh_fuse_price.h"
 
 using namespace std;
 using namespace boost;
@@ -181,6 +182,16 @@ void GraphDW::merge_vertices(Vertex a, Vertex b, bool a_before_b)
         }
     }
     assert(dag_validate(*this));
+}
+
+void GraphDW::merge_vertices_by_id(uint64_t id_a, uint64_t id_b)
+{
+    map<uint64_t, Vertex> id2vertex;
+    BOOST_FOREACH(const Vertex &v, vertices(_bglD))
+    {
+        id2vertex[_bglD[v].id()] = v;
+    }
+    merge_vertices(id2vertex[id_a], id2vertex[id_b]);
 }
 
 void GraphDW::transitive_reduction()
@@ -462,6 +473,16 @@ uint64_t dag_cost(const GraphD &dag)
     return cost;
 }
 
+uint64_t dag_cost_unique_views(const GraphD &dag)
+{
+    uint64_t cost = 0;
+    BOOST_FOREACH(const Vertex &v, vertices(dag))
+    {
+        cost += bohrium::kernel_cost_unique_views(dag[v]);
+    }
+    return cost;
+}
+
 void sort_weights(const GraphW &dag, std::vector<EdgeW> &edges)
 {
     struct wcmp
@@ -504,13 +525,14 @@ void pprint(const GraphDW &dag, const char filename[])
         void operator()(std::ostream& out) const
         {
             const uint64_t cost = dag_cost(graph);
+            const uint64_t cost_uv = dag_cost_unique_views(graph);
             out << "labelloc=\"t\";" << endl;
             out << "label=\"DAG with a total cost of ";
             if(cost > 10000)
                 out << (double) cost;
             else
                 out << cost;
-            out << " bytes\";" << endl;
+            out << " (" << (double) cost_uv << " bytes)\";" << endl;
             out << "graph [bgcolor=white, fontname=\"Courier New\"]" << endl;
             out << "node [shape=box color=black, fontname=\"Courier New\"]" << endl;
         }
@@ -523,13 +545,13 @@ void pprint(const GraphDW &dag, const char filename[])
         void operator()(std::ostream& out, const Vertex& v) const
         {
             const uint64_t cost = graph[v].cost();
-            char buf[1024*10];
-            out << "[label=\"Kernel " << v << ", ";
+            const uint64_t cost_uv = graph[v].cost_unique_views();
+            out << "[label=\"Kernel " << graph[v].id() << ", cost: ";
             if(cost > 10000)
                 out << (double) cost;
             else
                 out << cost;
-            out << " bytes\\n";
+            out << " (" << (double) cost_uv << " bytes)\\n";
             out << "Shape: ";
             const std::vector<bh_index>& ishape = graph[v].get_input_shape();
             for (size_t i = 0; i < ishape.size(); ++i)
@@ -547,88 +569,54 @@ void pprint(const GraphDW &dag, const char filename[])
             out << "\\lInput views: \\l";
             BOOST_FOREACH(const bh_view &i, graph[v].get_input_set())
             {
-                bh_sprint_view(&i, buf);
-                out << graph[v].get_view_id(i) << ":" << buf << "\\l";
+                out << i << "\\l";
             }
             out << "Output views: \\l";
             BOOST_FOREACH(const bh_view &i, graph[v].get_output_set())
             {
-                bh_sprint_view(&i, buf);
-                out << graph[v].get_view_id(i) << ":" << buf << "\\l";
+                out << i << "\\l";
             }
             out << "Parameters: \\l";
             for (const std::pair<size_t,bh_base*>& p: graph[v].get_parameters())
             {
-                bh_sprint_base(p.second, buf);
-                out << "[" << p.first << "]" << buf << "\\l";
-            }
-            out << "Constants: \\l";
-            for (const std::pair<uint64_t, bh_constant>& c: graph[v].get_constants())
-            {
-                out << "[" << c.first << "]" ;
-                bh_sprint_const(&c.second, buf);
-                out << buf << "\\l";
+                out << *p.second << "\\l";
             }
             out << "Temp base-arrays: \\l";
             BOOST_FOREACH(const bh_base* i, graph[v].get_temps())
             {
-                bh_sprint_base(i, buf);
-                out << buf << "\\l";
+                out << *i << "\\l";
             }
             out << "Free base-arrays: \\l";
             BOOST_FOREACH(const bh_base* i, graph[v].get_frees())
             {
-                bh_sprint_base(i, buf);
-                out << buf << "\\l";
+                out << *i << "\\l";
             }
             out << "Discard base-arrays: \\l";
             BOOST_FOREACH(const bh_base* i, graph[v].get_discards())
             {
-                bh_sprint_base(i, buf);
-                out << buf << "\\l";
+                out << *i << "\\l";
             }
             out << "Sync base-arrays: \\l";
             BOOST_FOREACH(const bh_base* i, graph[v].get_syncs())
             {
-                bh_sprint_base(i, buf);
-                out << buf << "\\l";
+                out << *i << "\\l";
             }
+            out << "Instructions: \\l";
             BOOST_FOREACH(uint64_t idx, graph[v].instr_indexes())
             {
                 const bh_instruction &instr = graph[v].bhir->instr_list[idx];
-                out << "[" << idx << ": (";
-                switch (instr.opcode) {
-                case BH_NONE:
-                case BH_SYNC:
-                case BH_DISCARD:
-                case BH_FREE:
-                    break;
-                default:
-                    const int nop = bh_operands(instr.opcode);
-                    for(int i=0; i<nop; ++i)
-                    {
-                        if(not bh_is_constant(&instr.operand[i]))
-                            out << "v" << graph[v].get_view_id(instr.operand[i]);
-                        else
-                            out << "c" << idx;
-                        if (i < nop-1)
-                            out << ", ";
-                    }
-                }
-                out << ") ] ";
-                bh_sprint_instr(&instr, buf, "\\l");
-                out << buf << "\\l";
+                out << "[" << idx << "] " << instr << "\\l";
             }
-            out << "Directly nonfusible vertices: [";
+            out << "Directly nonfusible kernels: [";
             BOOST_FOREACH(Vertex v2, vertices(graph))
             {
                 if(v != v2 and not graph[v].fusible(graph[v2]))
-                    out << v2 << " ";
+                    out << graph[v2].id() << " ";
             }
             out << "]\\l";
-            out << "nonfusible vertices: [";
+            out << "nonfusible kernels: [";
             BOOST_FOREACH(Vertex v2, v2f.at(v))
-                    out << v2 << " ";
+                    out << graph[v2].id() << " ";
             out << "]\\l";
             out << "\"]";
         }
@@ -663,7 +651,7 @@ void pprint(const GraphDW &dag, const char filename[])
             out << "]";
         }
     };
-    ofstream file;
+    std::ofstream file;
     file.open(filename);
     write_graphviz(file, new_dag, kernel_writer(new_dag, vertex2nonfusibles),
                    edge_writer(new_dag, weights), graph_writer(new_dag));
@@ -989,4 +977,3 @@ void fuse_greedy(GraphDW &dag)
 }
 
 }} //namespace bohrium::dag
-

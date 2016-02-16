@@ -6,33 +6,44 @@ endif()
 
 include_directories(../../include)
 include_directories(../cpp/bxx)
-include_directories(codegen/output/)
 
-set(SRC ${CMAKE_CURRENT_SOURCE_DIR}/codegen/output/bh_c.h
-        ${CMAKE_CURRENT_SOURCE_DIR}/codegen/output/bh_c_type_definitions.hpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/codegen/output/bh_c_implementation.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/codegen/output/bh_c_implementation_basics.cpp)
+set(SRC_H ${CMAKE_CURRENT_BINARY_DIR}/out/bhc_types.h
+          ${CMAKE_CURRENT_BINARY_DIR}/out/bhc_specials.h
+          ${CMAKE_CURRENT_BINARY_DIR}/out/bhc_array_operations.h)
 
-    set(PY_SCRIPT ${PYTHON_EXECUTABLE} CACHE STRING "The Python interpreter to use for the build script and NOT the Python/NumPy Bridge")
+set(SRC_CPP ${CMAKE_CURRENT_BINARY_DIR}/out/bhc_types.cpp
+            ${CMAKE_CURRENT_BINARY_DIR}/out/bhc_specials.cpp
+            ${CMAKE_CURRENT_BINARY_DIR}/out/bhc_array_operations.cpp)
 
-if(PYTHONINTERP_FOUND)
 
-    file(GLOB DEPS codegen/templates/*.ctpl codegen/*.json codegen/*.py)
-    add_custom_command(
-      OUTPUT ${SRC}
-      COMMAND ${PY_SCRIPT} codegen/gen.py
-      DEPENDS ${DEPS}  #TODO: gen.py writes a old timestamp thus this will always run
-      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    )
+#Let's generate the source files of the C bridge
+#Note that we concatenate all header files in to one 'bhc.h'
+add_custom_command(
+    OUTPUT ${SRC_H} ${SRC_CPP} ${CMAKE_CURRENT_BINARY_DIR}/out/bhc.h
+    COMMAND ${PYTHON_EXECUTABLE} gen_types.py ${CMAKE_CURRENT_BINARY_DIR}/out
+    COMMAND ${PYTHON_EXECUTABLE} gen_array_operations.py ${CMAKE_CURRENT_BINARY_DIR}/out
+    COMMAND ${PYTHON_EXECUTABLE} gen_specials.py ${CMAKE_CURRENT_BINARY_DIR}/out
+    COMMAND ${PYTHON_EXECUTABLE} cat_files.py ${SRC_H} --output ${CMAKE_CURRENT_BINARY_DIR}/out/bhc.h
+    DEPENDS gen_types.py
+            gen_array_operations.py
+            gen_specials.py
+            ../../core/codegen/opcodes.json
+            ../cpp/codegen/element_types.json
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
 
-    add_library(bhc SHARED ${SRC})
+add_library(bhc SHARED ${CMAKE_CURRENT_BINARY_DIR}/out/bhc_types.cpp
+                       ${CMAKE_CURRENT_BINARY_DIR}/out/bhc_array_operations.cpp
+                       ${CMAKE_CURRENT_BINARY_DIR}/out/bhc_specials.cpp
+)
 
-    #We depend on bh.so
-    target_link_libraries(bhc bh)
+#We depend on bh.so
+target_link_libraries(bhc bh)
 
-    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/codegen/output/bh_c.h DESTINATION include/bohrium COMPONENT bohrium)
-    install(TARGETS bhc DESTINATION lib COMPONENT bohrium)
+#And we depend on bxx being built
+add_dependencies(bhc BXX)
 
-else()
-    message(STATUS "The C-Bridge cannot be build!")
-endif()
+
+# Finally, let's install the compiled library and the combined header file
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/out/bhc.h DESTINATION include/bohrium COMPONENT bohrium)
+install(TARGETS bhc DESTINATION lib COMPONENT bohrium)

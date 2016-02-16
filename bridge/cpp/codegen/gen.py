@@ -131,23 +131,24 @@ def main():
     gens = [
         ('traits.ctpl',     'traits.hpp',    types),
 
-        ('sugar.header.ctpl',       'operators.hpp', datasets['sugar.binary']),
-        ('sugar.int.binary.ctpl',   'operators.hpp', datasets['sugar.int.binary']),
-        ('sugar.binary.ctpl',       'operators.hpp', datasets['sugar.binary']),
-        ('sugar.binary.bool.ctpl',  'operators.hpp', datasets['sugar.binary.bool']),
-        ('sugar.unary.ctpl',        'operators.hpp', datasets['sugar.unary']),
-        ('sugar.unary.bool.ctpl',   'operators.hpp', datasets['sugar.unary.bool']),
-        ('sugar.footer.ctpl',       'operators.hpp', datasets['sugar.unary']),
+        ('sugar.header.ctpl',       'operators.hpp', datasets['sugar.nops2']),
+
+        ('sugar.nops2.ctpl',        'operators.hpp', datasets['sugar.nops2']),
+        ('sugar.nops2.bool.ctpl',   'operators.hpp', datasets['sugar.nops2.bool']),
+
+        ('sugar.nops3.ctpl',        'operators.hpp', datasets['sugar.nops3']),
+        ('sugar.nops3.bool.ctpl',   'operators.hpp', datasets['sugar.nops3.bool']),
+        ('sugar.nops3.intern.ctpl', 'operators.hpp', datasets['sugar.nops3.intern']),
+
+        ('sugar.footer.ctpl',       'operators.hpp', datasets['sugar.nops2']),
 
         ('runtime.typechecker.ctpl', 'runtime.typechecker.hpp', checker),
 
-        ('runtime.header.ctpl',     'runtime.operations.hpp', datasets['runtime.binary']),
-        ('runtime.none.ctpl',       'runtime.operations.hpp', datasets['runtime.none']),
-        ('runtime.binary.ctpl',     'runtime.operations.hpp', datasets['runtime.binary']),
-        ('runtime.binary.bool.ctpl','runtime.operations.hpp', datasets['runtime.binary.bool']),
-        ('runtime.unary.ctpl',      'runtime.operations.hpp', datasets['runtime.unary']),
-        ('runtime.unary.bool.ctpl', 'runtime.operations.hpp', datasets['runtime.unary.bool']),
-        ('runtime.zero.ctpl',       'runtime.operations.hpp', datasets['runtime.zero']),
+        ('runtime.header.ctpl',     'runtime.operations.hpp', datasets['runtime.nops3']),
+        ('runtime.nops0.ctpl',      'runtime.operations.hpp', datasets['runtime.nops0']),
+        ('runtime.nops3.ctpl',      'runtime.operations.hpp', datasets['runtime.nops3']),
+        ('runtime.nops2.ctpl',      'runtime.operations.hpp', datasets['runtime.nops2']),
+        ('runtime.nops1.ctpl',      'runtime.operations.hpp', datasets['runtime.nops1']),
         ('runtime.random.ctpl',     'runtime.operations.hpp', datasets['runtime.random']),
         ('runtime.accumulate.ctpl', 'runtime.operations.hpp', datasets['runtime.accumulate']),
         ('runtime.reduce.ctpl',     'runtime.operations.hpp', datasets['runtime.reduce']),

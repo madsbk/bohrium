@@ -54,10 +54,10 @@ static uint64_t cost_unique(const bh_ir_kernel &k)
     unique_views.insert(k.get_output_set().begin(), k.get_output_set().end());
 
     uint64_t sum = 0;
-    for(const bh_view &v: unique_views)
-    {
+    for(const bh_view &v: k.get_input_set())
         sum += bytes_in_view(v);
-    }
+    for(const bh_view &v: k.get_output_set())
+        sum += bytes_in_view(v);
     return sum;
 }
 static uint64_t savings_unique(const bh_ir_kernel &k1, const bh_ir_kernel &k2)
@@ -150,6 +150,8 @@ static uint64_t cost_max_share(const bh_ir_kernel &k)
                 const bh_view &read = krn_instr.operand[i];
                 if(bh_is_constant(&read))
                     continue;
+                if(read.base->nelem <= 1)
+                    continue; //We ignore 1-sized arrays
                 if(instr.operand[0] == read)
                     ++shared_access;
             }
@@ -166,6 +168,8 @@ static uint64_t cost_max_share(const bh_ir_kernel &k)
                 {
                     if(bh_is_constant(&krn_instr.operand[j]))
                         continue;
+                    if(krn_instr.operand[j].base->nelem <= 1)
+                        continue; //We ignore 1-sized arrays
                     if(instr.operand[i] == krn_instr.operand[j])
                         ++shared_access;
                 }
@@ -288,6 +292,11 @@ uint64_t kernel_cost(const bh_ir_kernel &kernel)
     default:
         throw runtime_error("No price module is selected!");
     }
+}
+
+uint64_t kernel_cost_unique_views(const bh_ir_kernel &kernel)
+{
+    return cost_unique(kernel);
 }
 
 uint64_t cost_savings(const bh_ir_kernel &k1, const bh_ir_kernel &k2)
