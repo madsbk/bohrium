@@ -478,7 +478,7 @@ string Emitter::generate_source(bool offload)
     }
 
     const uint32_t rank = iterspace().meta().ndim;
-    int64_t axis = rank-1;  // TODO: Decide dynamically
+    int64_t axis = iterspace().meta().axis;
 
     Skeleton krn(plaid_, "skel.kernel");
     Skeleton loop(plaid_, "skel.loop");
@@ -498,7 +498,6 @@ string Emitter::generate_source(bool offload)
     krn["HEAD"]    += unpack_arguments();
 
     krn["BODY"]    = "";
-
 
     // Construct the axis loop
     loop["INIT"] = _declare_init(_int64(), "idx"+to_string(axis),  "0");
@@ -635,11 +634,37 @@ string Emitter::generate_source(bool offload)
                 )
             );
             loop["BODY"] += _end(oper_description(tac));
-            // TODO: update this when out can be intermediate
+
+            // TODO: Needs change when streaming since "out" could be intermediate
             loop["EPILOG"] += _assign(
                 _deref(operand_glb(tac.out).walker()),
                 operand_glb(tac.in1).accu_private()
             )+_end(" Write accumulated variable to array.");
+            break;
+
+        case KP_SCAN:
+            // Declare and initialize private accumulator to neutral
+            loop["PROLOG"] += _line(_declare_init(
+                operand_glb(tac.in1).etype(),
+                operand_glb(tac.in1).accu_private(),
+                oper_neutral_element(tac.oper, operand_glb(tac.in1).meta().etype)
+            ));
+            // The accumulation operation itself
+            loop["BODY"] += _assign(
+                operand_glb(tac.in1).accu_private(),
+                oper(
+                    tac.oper,
+                    operand_glb(tac.in1).meta().etype,
+                    operand_glb(tac.in1).accu_private(),
+                    axis_access(tac.in1, axis)
+                )
+            );
+            loop["BODY"] += _end("Accumulatation");
+            loop["BODY"] += _assign(
+                axis_access(tac.out, axis),
+                operand_glb(tac.in1).accu_private()
+            );
+            loop["BODY"] += _end(oper_description(tac));
             break;
 
         default:
@@ -681,15 +706,22 @@ string Emitter::generate_source(bool offload)
             case KP_STRIDED:
                 {
                     stringstream offset;    // DO: offset += idx*stride for every non-axis dim
+                    int64_t opd_rank = operand.meta().ndim;
+                    int64_t opd_dim = 0;
                     for(int64_t dim=0; dim<rank; ++dim) {
-                        if (dim!=axis) {    
-                            offset << " + " << _mul(
-                                operand.strides()+"_d"+to_string(dim),
-                                "idx"+to_string(dim)
-                            );
+                        if (dim==axis) {
+                            if (opd_rank==rank) {
+                                ++opd_dim;
+                            }
+                            continue;
                         }
+                        offset << " + " << _mul(
+                            operand.strides()+"_d"+to_string(opd_dim),
+                            "idx"+to_string(dim)
+                        );
+                        ++opd_dim;
                     }
-                    // Declare array buffers and add non-axis offsets, + start.
+                                            // Declare array pointers
                     if (restrictable) {     // Annotate *restrict*
                         loop["PROLOG"] += _declare_init(
                             _restrict(_ptr(operand.etype())),
@@ -715,21 +747,23 @@ string Emitter::generate_source(bool offload)
 
     krn["BODY"] = loop.emit();
 
-    for(int64_t idx=rank-1; idx>=0; --idx) {
-        if (idx==axis) {
-            continue;
+    if (iterspace().meta().layout>KP_SCALAR) {
+        for(int64_t idx=rank-1; idx>=0; --idx) {
+            if (idx==axis) {
+                continue;
+            }
+            loop.reset();   // Clear the skeleton
+            loop["INIT"] = _declare_init(_int64(), "idx"+to_string(idx),  "0");
+            loop["COND"] =_lt(
+                "idx"+to_string(idx),
+                "iterspace_shape_d"+ to_string(idx)
+            );
+            loop["INCR"] = _inc("idx" + to_string(idx));
+
+            loop["BODY"] = krn["BODY"];
+
+            krn["BODY"] = loop.emit();
         }
-        loop.reset();   // Clear the skeleton
-        loop["INIT"] = _declare_init(_int64(), "idx"+to_string(idx),  "0");
-        loop["COND"] =_lt(
-            "idx"+to_string(idx),
-            "iterspace_shape_d"+ to_string(idx)
-        );
-        loop["INCR"] = _inc("idx" + to_string(idx));
-
-        loop["BODY"] = krn["BODY"];
-
-        krn["BODY"] = loop.emit();
     }
 
     set<uint64_t> written;  // Write scalars back to memory

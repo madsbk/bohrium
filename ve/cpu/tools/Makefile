@@ -119,9 +119,13 @@ clean:
 crap:
 	rm -f graph*.dot flow*.dot trace*.txt flow*.html vgcore.* core /tmp/graph*.html /tmp/graph*.png /tmp/graph*.png
 
+foo:
+	BH_CPU_JIT_NESTED=1 python $(BH_SRC)/ve/cpu/tools/red.py
+	BH_CPU_JIT_NESTED=1 python -m bohrium $(BH_SRC)/ve/cpu/tools/red.py
+
 test:
-	BH_CPU_JIT_LEVEL=3 python  $(BH_SRC)/test/python/numpytest.py $(TEST_EXCLUDE)
-	BH_CPU_JIT_LEVEL=1 python  $(BH_SRC)/test/python/numpytest.py $(TEST_EXCLUDE)
+	BH_CPU_JIT_LEVEL=3 python $(BH_SRC)/test/python/numpytest.py $(TEST_EXCLUDE)
+	BH_CPU_JIT_LEVEL=1 python $(BH_SRC)/test/python/numpytest.py $(TEST_EXCLUDE)
 
 #
 # Generate Doxygen documentation

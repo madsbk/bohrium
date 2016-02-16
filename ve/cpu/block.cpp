@@ -373,7 +373,7 @@ void Block::_update_iterspace(void)
         if (not ((tac.op & (KP_ARRAY_OPS))>0)) {   // Only interested in array ops
             continue;
         }
-        if ((tac.op & (KP_REDUCE_COMPLETE | KP_REDUCE_PARTIAL))>0) {    // Reductions are weird
+        if ((tac.op & (KP_REDUCE_COMPLETE | KP_REDUCE_PARTIAL | KP_SCAN))>0) {    // Reductions are weird
             if (globals_[tac.in1].layout >= block_.iterspace.layout) {  // Iterspace
                 block_.iterspace.layout = globals_[tac.in1].layout;
                 block_.iterspace.ndim  = globals_[tac.in1].ndim;
