@@ -86,6 +86,7 @@ typedef struct kp_program {
 
 typedef struct kp_iterspace {
     KP_LAYOUT layout;   // The dominating layout
+    int64_t axis;       // FUTE: Array signifying axis traversal order
     int64_t ndim;       // The dominating rank/dimension of the iteration space
     int64_t* shape;     // Shape of the iteration space
     int64_t nelem;      // The number of elements in the iteration space

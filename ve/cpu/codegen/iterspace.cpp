@@ -23,6 +23,13 @@ string Iterspace::layout(void)
     return ss.str();
 }
 
+string Iterspace::axis(void)
+{
+    stringstream ss;
+    ss << name() << "_axis";
+    return ss.str();
+}
+
 string Iterspace::ndim(void)
 {
     stringstream ss;

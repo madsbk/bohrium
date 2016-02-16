@@ -484,7 +484,7 @@ string Emitter::generate_source(bool offload)
     Skeleton loop(plaid_, "skel.loop");
 
     krn["MODE"]            = (block().narray_tacs()>1) ? "FUSED" : "SIJ";
-    krn["LAYOUT"]          = layout_text(block().iterspace().layout);
+    krn["LAYOUT"]          = layout_text(iterspace().meta().layout);
     krn["NINSTR"]          = to_string(block().ntacs());
     krn["NARRAY_INSTR"]    = to_string(block().narray_tacs());
     krn["NARGS"]           = to_string(block().noperands());

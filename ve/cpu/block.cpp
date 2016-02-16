@@ -50,6 +50,7 @@ void Block::clear(void)
     block_.noperands = 0;           // Operands
 
     block_.iterspace.layout = KP_SCALAR_TEMP;   // Iteraton space
+    block_.iterspace.axis = -1;
     block_.iterspace.ndim = 0;
     block_.iterspace.shape = NULL;
     block_.iterspace.nelem = 0;
@@ -191,7 +192,7 @@ size_t Block::_localize_scope(size_t global_idx)
 
 bool Block::symbolize(void)
 {
-    stringstream tacs, operands_ss;
+    stringstream ispace, tacs, operands_ss;
 
     //
     // Scope
@@ -207,6 +208,11 @@ bool Block::symbolize(void)
             operands_ss << "A";
         }
     }
+
+    ispace << "KP_ITERSPACE";
+    ispace << "-L" << block_.iterspace.layout;
+    ispace << "-A" << block_.iterspace.axis;
+    ispace << "-D" << block_.iterspace.ndim;
 
     //
     // Program
@@ -228,28 +234,10 @@ bool Block::symbolize(void)
         size_t ndim = ((tac.op & (KP_REDUCE_COMPLETE | KP_REDUCE_PARTIAL))>0) ? globals_[tac.in1].ndim : globals_[tac.out].ndim;
 
         //
-        // Adding info of whether the kernel does reduction on the inner-most
-        // dimensions or another "axis" dimension.
-        //
-        if ((tac.op & KP_REDUCE_PARTIAL)>0) {
-            if (*((uint64_t*)globals_[tac.in2].const_data) == (ndim-1)) {
-                tacs << "_INNER";
-            } else {
-                tacs << "_AXIS";
-            }
-        }
-
-        //
         // Add ndim up to 3
         //
         tacs << "-" << core::operator_text(tac.oper);
-        tacs << "-";
-        if (ndim <= 3) {
-            tacs << ndim;
-        } else {
-            tacs << "N";
-        }
-        tacs << "D";
+        tacs << "-" << ndim << "D";
 
         // Add operand IDs
         switch(tac_noperands(tac)) {
@@ -276,7 +264,7 @@ bool Block::symbolize(void)
         }
     }
 
-    symbol_text_    = tacs.str() +"_"+ operands_ss.str();
+    symbol_text_    = ispace.str() +"_"+ tacs.str() +"_"+ operands_ss.str();
     symbol_         = core::hash_text(symbol_text_);
 
     return true;
@@ -394,6 +382,13 @@ void Block::_update_iterspace(void)
             if (globals_[tac.out].layout > block_.iterspace.layout) {
                 block_.iterspace.layout = globals_[tac.out].layout;
             }
+            // Let reduction determine axis
+            // TODO: this case should apply for all axis-explicit functions
+            int64_t axis = *((int64_t*)globals_[tac.in2].const_data);
+            if ((block_.iterspace.axis != -1) && (block_.iterspace.axis != axis)) {
+                throw runtime_error("Multiple reductions on different axis => Fail.");
+            }
+            block_.iterspace.axis = axis;
         } else {
             switch(tac_noperands(tac)) {
                 case 3:
@@ -426,11 +421,15 @@ void Block::_update_iterspace(void)
         }
     }
 
-    if (NULL != block_.iterspace.shape) {               // Determine number of elements
+    if (NULL != block_.iterspace.shape) {   // Determine number of elements
         block_.iterspace.nelem = 1;
         for(int k=0; k<block_.iterspace.ndim; ++k) {
             block_.iterspace.nelem *= block_.iterspace.shape[k];
         }
+    }
+
+    if (-1 == block_.iterspace.axis) {      // When unset(-1), default to innermost
+        block_.iterspace.axis = block_.iterspace.ndim > 0 ? block_.iterspace.ndim-1 : 0;
     }
 }
 

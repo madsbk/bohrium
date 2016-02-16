@@ -299,6 +299,7 @@ public:
     Iterspace(kp_iterspace & iterspace);
 
     std::string name(void);
+    std::string axis(void);
     std::string layout(void);
     std::string ndim(void);
     std::string shape(void);

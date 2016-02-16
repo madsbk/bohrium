@@ -353,6 +353,7 @@ std::string iterspace_text(const kp_iterspace & iterspace)
     ss_layout_ndim << core::layout_text(iterspace.layout);
     ss_layout_ndim << setw(4);
     ss_layout_ndim << " "+ to_string(iterspace.ndim) + "D ";
+    ss_layout_ndim << " "+ to_string(iterspace.axis) + "A ";
 
     for(int64_t dim=0; dim <iterspace.ndim; ++dim) {
         //ss_shape << iterspace.shape[dim];
