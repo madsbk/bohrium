@@ -439,7 +439,14 @@ class Emitter
 {
 public:
     Emitter(Plaid& plaid, kp::core::Block& block);
-    
+   
+    std::string scalar_walk();
+    std::string collapsed_walk();
+    std::string nested_walk();
+
+    void emit_operations(Skeleton& skel);
+    void declare_init_opds(Skeleton& skel, std::string sect);
+
     std::string generate_source(bool offload);
 
     std::string axis_access(int64_t glb_idx, int64_t axis);
