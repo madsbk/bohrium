@@ -762,8 +762,25 @@ string Emitter::generate_source(bool offload)
         loop["PROLOG"] += _end(operand.layout());
     }
 
-    krn["BODY"] = loop.emit();
+    set<uint64_t> written;  // Write scalars back to memory
+    for(kernel_tac_iter tit=tacs_begin();
+        tit!=tacs_end();
+        ++tit) {
+        kp_tac & tac = **tit;
 
+        Operand& opd = operand_glb(tac.out);
+        if (((tac.op & (KP_MAP | KP_ZIP | KP_GENERATE))>0) and \
+            ((opd.meta().layout & KP_SCALAR)>0) and \
+            (written.find(tac.out)==written.end())) {
+            loop["EPILOG"] += _line(_assign(
+                _deref(_add(opd.buffer_data(), opd.start())),
+                opd.walker_val()
+            ));
+            written.insert(tac.out);
+        }
+    }
+
+    krn["BODY"] = loop.emit();
     if (iterspace().meta().layout>KP_SCALAR) {
         for(int64_t idx=rank-1; idx>=0; --idx) {
             if (idx==axis) {
@@ -783,38 +800,18 @@ string Emitter::generate_source(bool offload)
         }
     }
 
-    set<uint64_t> written;  // Write scalars back to memory
-    for(kernel_tac_iter tit=tacs_begin();
-        tit!=tacs_end();
-        ++tit) {
-        kp_tac & tac = **tit;
-
-        Operand& opd = operand_glb(tac.out);
-        if (((tac.op & (KP_MAP | KP_ZIP | KP_GENERATE))>0) and \
-            ((opd.meta().layout & KP_SCALAR)>0) and \
-            (written.find(tac.out)==written.end())) {
-            loop["FOOT"] += _line(_assign(
-                _deref(_add(opd.buffer_data(), opd.start())),
-                opd.walker_val()
-            ));
-            written.insert(tac.out);
-        }
-    }
-
     // Scalar kernel. We extract the body and prolog of the "loop"
     if ((iterspace().meta().layout & (KP_SCALAR))>0) {
         Skeleton code_block(plaid_, "skel.block");
 
         code_block["HEAD"] = loop["PROLOG"];
         code_block["BODY"] = loop["BODY"];
-        code_block["FOOT"] = loop["FOOT"];
+        code_block["FOOT"] = loop["EPILOG"];
 
         krn["BODY"] = code_block.emit();
     }
 
-    string src = krn.emit();
-
-    return src;
+    return krn.emit();
 }
 
 string Emitter::unpack_iterspace(void)

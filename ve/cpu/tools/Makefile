@@ -5,6 +5,8 @@ BDIR=/tmp/bhbuild_cpu/
 PAR_LVL=-j1
 BH_PYTHON=python
 TEST_EXCLUDE=--exclude-test=test_lbm_3d --exclude-test=test_lu --exclude-test=test_matmul --exclude-test=test_reduce_bool
+TEST_EXCLUDE=--exclude-test=test_lbm_3d
+TEST_EXCLUDE=
 DUMPSRC=1
 
 BUILD_OPTIONS=
