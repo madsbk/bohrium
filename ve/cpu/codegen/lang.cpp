@@ -889,7 +889,7 @@ string _range(void)
     return ss.str();
 }
 
-string _random(string index, string key)
+string _random(string count, string index, string key)
 {
     //
     // NOTE: eidx is only defined in ewise.cont template
@@ -909,7 +909,7 @@ string _random(string index, string key)
     stringstream ss;
     ss  << "((philox2x32_as_1x64_t)"
         << "philox2x32("
-        << "  ((philox2x32_as_1x64_t)( " << index << " + eidx)).orig,"
+        << "  ((philox2x32_as_1x64_t)( " << index << " + " << count << ")).orig,"
         << "  (philox2x32_key_t){ { " << key << " } }"
         << ")).combined";
     return ss.str();

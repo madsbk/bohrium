@@ -179,7 +179,7 @@ std::string _trunc(std::string right);
 std::string _floor(std::string right);
 std::string _rint(std::string right);
 std::string _range(void);
-std::string _random(std::string left, std::string right);
+std::string _random(std::string count, std::string index, std::string key);
 std::string _isnan(std::string right);
 std::string _isinf(std::string right);
 

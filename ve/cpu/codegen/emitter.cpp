@@ -225,7 +225,7 @@ string Emitter::oper(KP_OPERATOR oper, KP_ETYPE etype, string in1, string in2)
                 case KP_COMPLEX64:     return _cpowf(in1, in2);
                 default:            return _pow(in1, in2);
             }
-        case KP_RANDOM:                return _random(in1, in2);
+        case KP_RANDOM:                return _random("idx0", in1, in2);
         //case KP_RANGE:                 return _range();
         case KP_RANGE:                 return "idx0";
         case KP_REAL:
@@ -527,6 +527,7 @@ string Emitter::generate_source(bool offload)
             );
             loop["BODY"] += _end(oper_description(tac));
             break;
+
         case KP_MAP:
             loop["BODY"] += _assign(
                 axis_access(tac.out, axis),
@@ -539,16 +540,32 @@ string Emitter::generate_source(bool offload)
             );
             loop["BODY"] += _end(oper_description(tac));
             break;
+
         case KP_GENERATE:
-            loop["BODY"] += _assign(
-                axis_access(tac.out, axis),
-                oper(
-                    tac.oper,
-                    etype,
-                    "",
-                    ""
-                )
-            );
+            switch(tac.oper) {
+            case KP_RANDOM: // Random has inputs
+                loop["BODY"] += _assign(
+                    axis_access(tac.out, axis),
+                    oper(
+                        tac.oper,
+                        etype,
+                        axis_access(tac.in1, axis),
+                        axis_access(tac.in2, axis)
+                    )
+                );
+                break;
+            default:
+                loop["BODY"] += _assign(
+                    axis_access(tac.out, axis),
+                    oper(
+                        tac.oper,
+                        etype,
+                        "",
+                        ""
+                    )
+                );
+                break;
+            }
             loop["BODY"] += _end(oper_description(tac));
             break;
 
@@ -776,7 +793,7 @@ string Emitter::generate_source(bool offload)
         if (((tac.op & (KP_MAP | KP_ZIP | KP_GENERATE))>0) and \
             ((opd.meta().layout & KP_SCALAR)>0) and \
             (written.find(tac.out)==written.end())) {
-            krn["FOOT"] += _line(_assign(
+            loop["FOOT"] += _line(_assign(
                 _deref(_add(opd.buffer_data(), opd.start())),
                 opd.walker_val()
             ));
@@ -790,6 +807,7 @@ string Emitter::generate_source(bool offload)
 
         code_block["HEAD"] = loop["PROLOG"];
         code_block["BODY"] = loop["BODY"];
+        code_block["FOOT"] = loop["FOOT"];
 
         krn["BODY"] = code_block.emit();
     }

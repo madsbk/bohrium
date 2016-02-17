@@ -227,7 +227,7 @@ string Walker::oper(KP_OPERATOR oper, KP_ETYPE etype, string in1, string in2)
                 case KP_COMPLEX64:     return _cpowf(in1, in2);
                 default:            return _pow(in1, in2);
             }
-        case KP_RANDOM:                return _random(in1, in2);
+        case KP_RANDOM:                return _random("eidx", in1, in2);
         case KP_RANGE:                 return _range();
         case KP_REAL:
             switch(etype) {
