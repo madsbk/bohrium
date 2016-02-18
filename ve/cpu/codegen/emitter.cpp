@@ -884,7 +884,7 @@ string Emitter::generate_source(bool offload)
     krn["SYMBOL"]          = block().symbol();
 
     //
-    //  Construct kernel head, BEFORE any loop constructs / kernel-body.
+    //  Construct kernel HEAD BEFORE any loop constructs / kernel-body.
     //
     krn["HEAD"]    += unpack_iterspace();
     krn["HEAD"]    += unpack_buffers();
@@ -903,7 +903,7 @@ string Emitter::generate_source(bool offload)
     }
 
     //
-    // Construct the kernel foot, AFTER any loop constructs / kernel-body.
+    // Construct the kernel FOOT, code AFTER any loop constructs / kernel-body.
     //
     for(kernel_tac_iter tit=tacs_begin(); tit!=tacs_end(); ++tit) {
         kp_tac& tac = **tit;
@@ -923,23 +923,17 @@ string Emitter::generate_source(bool offload)
     //
     //  Construct the kernel body
     //
-    krn["BODY"]    = "";
+    krn["BODY"] = "";
 
-    // Construct the axis loop
-    Skeleton loop(plaid_, "skel.loop");
+    //
+    // Start with a code-block
+    Skeleton code_block(plaid_, "skel.block");  // Start with a code-block
 
-    declare_init_opds(loop, "PROLOG");  // Declare operand variables and offset them
+    declare_init_opds(code_block, "PROLOG");    // Declare operand variables and offset them
 
-    loop["INIT"] = _declare_init(_int64(), "idx"+to_string(axis),  "0");
-    loop["COND"] =_lt(
-        "idx"+to_string(axis),
-        "iterspace_shape_d"+ to_string(axis)
-    );
-    loop["INCR"] = _inc("idx" + to_string(axis));
+    emit_operations(code_block);                // Fills PROLOG, BODY, EPILOG
 
-    emit_operations(loop);
-
-    set<uint64_t> written;  // Write scalars back to memory
+    set<uint64_t> written;                      // Write scalars back to memory
     for(kernel_tac_iter tit=tacs_begin();
         tit!=tacs_end();
         ++tit) {
@@ -949,7 +943,7 @@ string Emitter::generate_source(bool offload)
         if (((tac.op & (KP_MAP | KP_ZIP | KP_GENERATE))>0) and \
             ((opd.meta().layout & KP_SCALAR)>0) and \
             (written.find(tac.out)==written.end())) {
-            loop["EPILOG"] += _line(_assign(
+            code_block["EPILOG"] += _line(_assign(
                 _deref(_add(opd.buffer_data(), opd.start())),
                 opd.walker_val()
             ));
@@ -957,11 +951,24 @@ string Emitter::generate_source(bool offload)
         }
     }
 
-    krn["BODY"] = loop.emit();
+    krn["BODY"] = code_block.emit();
 
-    // Nested kernel
-    if (iterspace().meta().layout>KP_SCALAR) {
-        for(int64_t idx=ndim-1; idx>=0; --idx) {
+    if (iterspace().meta().layout>KP_SCALAR) {      // Promote it to the nested loop construct
+
+        Skeleton loop(plaid_, "skel.loop");         // Construct inner-most loop
+        loop["INIT"] = _declare_init(_int64(), "idx"+to_string(axis),  "0");
+        loop["COND"] =_lt(
+            "idx"+to_string(axis),
+            "iterspace_shape_d"+ to_string(axis)
+        );
+        loop["INCR"] = _inc("idx" + to_string(axis));
+        loop["PROLOG"] = code_block["PROLOG"];
+        loop["BODY"] = code_block["BODY"];
+        loop["EPILOG"] = code_block["EPILOG"];
+
+        krn["BODY"] = loop.emit();                  // Overwrite the code-block in kernel BODY
+
+        for(int64_t idx=ndim-1; idx>=0; --idx) {    // Fill in the outer loops
             if (idx==axis) {
                 continue;
             }
@@ -977,17 +984,6 @@ string Emitter::generate_source(bool offload)
 
             krn["BODY"] = loop.emit();
         }
-    }
-
-    // Scalar kernel. We extract the prolog, body and epilog of the "loop"
-    if ((iterspace().meta().layout & (KP_SCALAR))>0) {
-        Skeleton code_block(plaid_, "skel.block");
-
-        code_block["HEAD"] = loop["PROLOG"];
-        code_block["BODY"] = loop["BODY"];
-        code_block["FOOT"] = loop["EPILOG"];
-
-        krn["BODY"] = code_block.emit();
     }
 
     return krn.emit();
