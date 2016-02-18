@@ -1,8 +1,8 @@
 {{PROLOG}}
 {{PRAGMA}}
 {
-{{HEAD}}
-{{BODY}}
-{{FOOT}}
+    {{HEAD}}
+    {{BODY}}
+    {{FOOT}}
 }
 {{EPILOG}}

@@ -868,13 +868,14 @@ string Emitter::generate_source(bool offload)
         throw runtime_error("KP_EXTENSION in kernel");
     }
 
-    const uint32_t ndim = iterspace().meta().ndim;
-    int64_t axis = iterspace().meta().axis;
+    const int64_t ispace_axis = iterspace().meta().axis;
+    const int64_t ispace_ndim = iterspace().meta().ndim;
+    const KP_LAYOUT ispace_layout = iterspace().meta().layout;
 
     Skeleton krn(plaid_, "skel.kernel");
 
     krn["MODE"]            = (block().narray_tacs()>1) ? "FUSED" : "SIJ";
-    krn["LAYOUT"]          = layout_text(iterspace().meta().layout);
+    krn["LAYOUT"]          = layout_text(ispace_layout);
     krn["NINSTR"]          = to_string(block().ntacs());
     krn["NARRAY_INSTR"]    = to_string(block().narray_tacs());
     krn["NARGS"]           = to_string(block().noperands());
@@ -926,7 +927,7 @@ string Emitter::generate_source(bool offload)
     krn["BODY"] = "";
 
     //
-    // Start with a code-block
+    // Start with a code-block, handling scalars
     Skeleton code_block(plaid_, "skel.block");  // Start with a code-block
 
     declare_init_opds(code_block, "PROLOG");    // Declare operand variables and offset them
@@ -950,18 +951,41 @@ string Emitter::generate_source(bool offload)
             written.insert(tac.out);
         }
     }
+                                                            // Scalar kernel
+    if (((ispace_layout & (KP_SCALAR|KP_SCALAR_CONST|KP_CONTRACTABLE))>0) &&
+        ((omask() & KP_ACCUMULATION)==0)) {                 // Accumulations aren't allowed here
+                                                            // They should be filtered out.
+        krn["BODY"] = code_block.emit();
 
-    krn["BODY"] = code_block.emit();
+    } else if (((omask() & KP_SCAN)==0) && (ispace_ndim==1)) { // Promote code_block to loop
 
-    if (iterspace().meta().layout>KP_SCALAR) {      // Promote it to the nested loop construct
+        Skeleton loop(plaid_, "skel.loop"); 
+        loop["INIT"] = _declare_init(_int64(), "idx"+to_string(ispace_axis),  "0");
+        loop["COND"] =_lt(
+            "idx"+to_string(ispace_axis),
+            "iterspace_shape_d"+ to_string(ispace_axis)
+        );
+        loop["INCR"] = _inc("idx" + to_string(ispace_axis));
+        loop["PROLOG"] = code_block["PROLOG"];
+        loop["PRAGMA"] = "#pragma omp for schedule(static)";
+        loop["BODY"] = code_block["BODY"];
+        loop["EPILOG"] = code_block["EPILOG"];
+
+        code_block.reset();
+        code_block["PRAGMA"] = "#pragma omp parallel";
+        code_block["BODY"] = loop.emit();
+
+        krn["BODY"] = code_block.emit();
+
+    } else {                                        // Promote code_block to nested loop
 
         Skeleton loop(plaid_, "skel.loop");         // Construct inner-most loop
-        loop["INIT"] = _declare_init(_int64(), "idx"+to_string(axis),  "0");
+        loop["INIT"] = _declare_init(_int64(), "idx"+to_string(ispace_axis),  "0");
         loop["COND"] =_lt(
-            "idx"+to_string(axis),
-            "iterspace_shape_d"+ to_string(axis)
+            "idx"+to_string(ispace_axis),
+            "iterspace_shape_d"+ to_string(ispace_axis)
         );
-        loop["INCR"] = _inc("idx" + to_string(axis));
+        loop["INCR"] = _inc("idx" + to_string(ispace_axis));
         loop["PROLOG"] = code_block["PROLOG"];
         loop["BODY"] = code_block["BODY"];
         loop["EPILOG"] = code_block["EPILOG"];
@@ -969,11 +993,11 @@ string Emitter::generate_source(bool offload)
         krn["BODY"] = loop.emit();                  // Overwrite the code-block in kernel BODY
 
         vector<int64_t> outer_axes;                 // Determine the outer axes
-        for(int64_t idx=ndim-1; idx>=0; --idx) {
-            if (idx==axis) {
+        for(int64_t axis=ispace_ndim-1; axis>=0; --axis) {
+            if (axis==ispace_axis) {
                 continue;
             }
-            outer_axes.push_back(idx);
+            outer_axes.push_back(axis);
         }
 
         for(vector<int64_t>::iterator idx=outer_axes.begin(); idx!=outer_axes.end(); ++idx) {
@@ -981,8 +1005,8 @@ string Emitter::generate_source(bool offload)
    
             if (*idx==outer_axes.back()) {
                 loop["PRAGMA"] = "#pragma omp parallel for schedule(static)";
-                if (iterspace().meta().ndim > 2) {
-                    loop["PRAGMA"] += " collapse(" + to_string(iterspace().meta().ndim-1) + ")";
+                if (ispace_ndim > 2) {
+                    loop["PRAGMA"] += " collapse(" + to_string(ispace_ndim-1) + ")";
                 }
             }
  
