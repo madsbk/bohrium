@@ -766,6 +766,7 @@ void Emitter::emit_operations(Skeleton& skel)
                 oper_neutral_element(tac.oper, operand_glb(tac.in1).meta().etype)
             ));
             // Update shared accumulator with value of private accumulator
+            /*
             skel["EPILOG"] += _assign(
                 operand_glb(tac.in1).accu_shared(),
                 oper(
@@ -774,16 +775,15 @@ void Emitter::emit_operations(Skeleton& skel)
                     operand_glb(tac.in1).accu_shared(),
                     operand_glb(tac.in1).accu_private()
                 )
-            )+_end(" Syncing shared <-> private accumultor var");
-            /*
+            ) + _end(" Syncing shared <-> private accumultor var");
+            */
             skel["EPILOG"] += _line(synced_oper(
                 tac.oper,
                 operand_glb(tac.in1).meta().etype,
                 operand_glb(tac.in1).accu_shared(),
                 operand_glb(tac.in1).accu_shared(),
                 operand_glb(tac.in1).accu_private()
-            ));
-            */
+            )) + _end(" Syncing shared <-> private accumultor var");
             
             // The reduction operation itself
 
@@ -968,17 +968,30 @@ string Emitter::generate_source(bool offload)
 
         krn["BODY"] = loop.emit();                  // Overwrite the code-block in kernel BODY
 
-        for(int64_t idx=ndim-1; idx>=0; --idx) {    // Fill in the outer loops
+        vector<int64_t> outer_axes;                 // Determine the outer axes
+        for(int64_t idx=ndim-1; idx>=0; --idx) {
             if (idx==axis) {
                 continue;
             }
+            outer_axes.push_back(idx);
+        }
+
+        for(vector<int64_t>::iterator idx=outer_axes.begin(); idx!=outer_axes.end(); ++idx) {
             loop.reset();   // Clear the skeleton
-            loop["INIT"] = _declare_init(_int64(), "idx"+to_string(idx),  "0");
+   
+            if (*idx==outer_axes.back()) {
+                loop["PRAGMA"] = "#pragma omp parallel for schedule(static)";
+                if (iterspace().meta().ndim > 2) {
+                    loop["PRAGMA"] += " collapse(" + to_string(iterspace().meta().ndim-1) + ")";
+                }
+            }
+ 
+            loop["INIT"] = _declare_init(_int64(), "idx"+to_string(*idx),  "0");
             loop["COND"] =_lt(
-                "idx"+to_string(idx),
-                "iterspace_shape_d"+ to_string(idx)
+                "idx"+to_string(*idx),
+                "iterspace_shape_d"+ to_string(*idx)
             );
-            loop["INCR"] = _inc("idx" + to_string(idx));
+            loop["INCR"] = _inc("idx" + to_string(*idx));
 
             loop["BODY"] = krn["BODY"];
 
