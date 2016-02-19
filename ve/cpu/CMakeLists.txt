@@ -256,7 +256,7 @@ set(VE_CPU_RT_VCACHE "10" CACHE STRING "VE-CPU: Victim cache size")
 
 set(VE_CPU_JIT_PRELOAD true CACHE BOOL "VE-CPU: Preload JIT objects")
 set(VE_CPU_JIT_LEVEL "3" CACHE STRING "VE-CPU: JIT level, 0=Disabled, 1=Fusion, 2=Fusion+Contraction")
-set(VE_CPU_JIT_NESTED false CACHE BOOL "VE-CPU: JIT nested codegen, false=Disabled, true=enabled")
+set(VE_CPU_JIT_NESTED true CACHE BOOL "VE-CPU: JIT nested codegen, false=Disabled, true=enabled")
 set(VE_CPU_JIT_DUMPSRC true CACHE BOOL "VE-CPU: Dump generated code to filesystem.")
 set(VE_CPU_JIT_OFFLOAD "${VE_CPU_JIT_OFFLOAD}" CACHE STRING "VE-CPU: Offloading: 0,1,2 (auto)")
 
