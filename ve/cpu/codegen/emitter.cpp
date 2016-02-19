@@ -442,22 +442,31 @@ kernel_tac_iter Emitter::tacs_end(void)
     return tacs_.end();
 }
 
-string Emitter::axis_access(int64_t glb_idx, int64_t axis)
+string Emitter::axis_access(int64_t glb_idx, const int64_t axis)
 {
     stringstream ss;
 
-    switch(operand_glb(glb_idx).meta().layout) {
-    case KP_STRIDED:
+    Operand& operand = operand_glb(glb_idx);
+
+    switch(operand.meta().layout) {
     case KP_CONTIGUOUS:
+    case KP_STRIDED:
     case KP_CONSECUTIVE:
-        ss << _index(
-            operand_glb(glb_idx).walker(),
-            _mul(
-                "idx"+to_string(axis),
-                operand_glb(glb_idx).strides()+"_d"+to_string(axis)
-            )
-        );
+        if ((axis == operand.meta().ndim-1) && (operand.meta().stride[axis] == 0)) {
+            ss << _index(operand.walker(), "0");
+        } else if ((axis == operand.meta().ndim-1) && (operand.meta().stride[axis] == 1)) {
+            ss << _index(operand.walker(), "idx"+to_string(axis));
+        } else {
+            ss << _index(
+                operand.walker(),
+                _mul(
+                    "idx"+to_string(axis),
+                    operand.strides()+"_d"+to_string(axis)
+                )
+            );
+        }
         break;
+
     default:
         ss << operand_glb(glb_idx).name();
         break;
