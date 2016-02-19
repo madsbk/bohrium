@@ -195,24 +195,45 @@ bool Block::symbolize(void)
     stringstream ispace, tacs, operands_ss;
 
     //
+    // Iteration space
+    ispace << "KP_ITERSPACE";
+    ispace << "-L" << block_.iterspace.layout;
+    ispace << "-A" << block_.iterspace.axis;
+    ispace << "-D" << block_.iterspace.ndim;
+
+    //
     // Scope
     for(int64_t oidx=0; oidx <block_.noperands; ++oidx) {
+        kp_operand& operand = *block_.operands[oidx];
         operands_ss << "~" << oidx;
-        operands_ss << core::layout_text_shand(block_.operands[oidx]->layout);
-        operands_ss << core::etype_text_shand(block_.operands[oidx]->etype);
+        operands_ss << core::layout_text_shand(operand.layout);
+        operands_ss << core::etype_text_shand(operand.etype);
 
+        operands_ss << "-S";    // Add the stride
+        switch(operand.layout) {
+            case KP_CONTIGUOUS:
+            case KP_STRIDED:
+            case KP_CONSECUTIVE:
+                if (block_.iterspace.axis == operand.ndim-1) {
+                    operands_ss << operand.stride[block_.iterspace.axis];
+                } else {
+                    operands_ss << "S";
+                }
+                break;
+
+            default:
+                operands_ss << "K";
+                break;
+        }
+
+        operands_ss << "-";
         // Let the "Restrictable" flag be part of the symbol.
-        if (buffer_refs_[block_.operands[oidx]->base].size()==1) {
+        if (buffer_refs_[operand.base].size()==1) {
             operands_ss << "R";
         } else {
             operands_ss << "A";
         }
     }
-
-    ispace << "KP_ITERSPACE";
-    ispace << "-L" << block_.iterspace.layout;
-    ispace << "-A" << block_.iterspace.axis;
-    ispace << "-D" << block_.iterspace.ndim;
 
     //
     // Program
