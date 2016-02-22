@@ -1054,8 +1054,7 @@ string Emitter::generate_source(bool offload)
         );
         ploop["INCR"] = "idx" + to_string(ispace_axis)+ "_chunked += KP_CHUNKSIZE";
 
-        ploop["PRAGMA"] += "#pragma omp for";
-        ploop["PRAGMA"] += " schedule(static)";
+        ploop["PRAGMA"] += "#pragma omp for schedule(static)";
         ploop["PROLOG"] = scalar_block["PROLOG"];
         ploop["EPILOG"] = scalar_block["EPILOG"];
         ploop["BODY"] = vloop.emit();
@@ -1069,6 +1068,7 @@ string Emitter::generate_source(bool offload)
 
     } else {                                        // Promote scalar_block to nested loop
 
+        // TODO: split this into vloop and ploop
         Skeleton loop(plaid_, "skel.loop");         // Construct axis loop
         loop["INIT"] = _declare_init(_int64(), "idx"+to_string(ispace_axis),  "0");
         loop["COND"] =_lt(
@@ -1095,27 +1095,27 @@ string Emitter::generate_source(bool offload)
             }
             outer_axes.push_back(axis);
         }
-
+                                                    // Generate the nested loop construct
         for(vector<int64_t>::iterator idx=outer_axes.begin(); idx!=outer_axes.end(); ++idx) {
-            loop.reset();   // Clear the skeleton
+            Skeleton nloop(plaid_, "skel.loop");
    
-            if (*idx==outer_axes.back()) {
-                loop["PRAGMA"] = "#pragma omp parallel for schedule(static)";
-                if (ispace_ndim > 2) {
-                    loop["PRAGMA"] += " collapse(" + to_string(ispace_ndim-1) + ")";
+            if (*idx==outer_axes.back()) {          // Add "omp parallel" to outermost loop
+                nloop["PRAGMA"] = "#pragma omp parallel for schedule(static)";
+                if (ispace_ndim > 2) {              // Annotate "collapse"
+                    nloop["PRAGMA"] += " collapse(" + to_string(ispace_ndim-1) + ")";
                 }
             }
  
-            loop["INIT"] = _declare_init(_int64(), "idx"+to_string(*idx),  "0");
-            loop["COND"] =_lt(
+            nloop["INIT"] = _declare_init(_int64(), "idx"+to_string(*idx),  "0");
+            nloop["COND"] =_lt(
                 "idx"+to_string(*idx),
                 "iterspace_shape_d"+ to_string(*idx)
             );
-            loop["INCR"] = _inc("idx" + to_string(*idx));
+            nloop["INCR"] = _inc("idx" + to_string(*idx));
 
-            loop["BODY"] = krn["BODY"];
+            nloop["BODY"] = krn["BODY"];
 
-            krn["BODY"] = loop.emit();
+            krn["BODY"] = nloop.emit();
         }
     }
 
