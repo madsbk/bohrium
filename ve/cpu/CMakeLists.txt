@@ -251,7 +251,7 @@ else()
         set(VE_CPU_COMPILER_FLG "${VE_CPU_COMPILER_FLG} -O3")
     endif()
     if (FLAG_NO_MATH_ERRNO_FOUND)
-        set(VE_CPU_COMPILER_FLG "${VE_CPU_COMPILER_FLG} -fno-math-errno")
+        set(VE_CPU_COMPILER_FLG "${VE_CPU_COMPILER_FLG} -fno-math-errno")   # Allow SIMD of sqrt etc.
     endif()
     if (FLAG_MARCH_NATIVE_FOUND)                                            # Machine specific code
         set(VE_CPU_COMPILER_FLG "${VE_CPU_COMPILER_FLG} -march=native")
