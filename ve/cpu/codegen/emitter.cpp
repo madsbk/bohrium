@@ -775,17 +775,6 @@ void Emitter::emit_operations(Skeleton& skel)
                 oper_neutral_element(tac.oper, operand_glb(tac.in1).meta().etype)
             ));
             // Update shared accumulator with value of private accumulator
-            /*
-            skel["EPILOG"] += _assign(
-                operand_glb(tac.in1).accu_shared(),
-                oper(
-                    tac.oper,
-                    operand_glb(tac.in1).meta().etype,
-                    operand_glb(tac.in1).accu_shared(),
-                    operand_glb(tac.in1).accu_private()
-                )
-            ) + _end(" Syncing shared <-> private accumultor var");
-            */
             skel["EPILOG"] += _line(synced_oper(
                 tac.oper,
                 operand_glb(tac.in1).meta().etype,
