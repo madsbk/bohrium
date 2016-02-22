@@ -1010,32 +1010,62 @@ string Emitter::generate_source(bool offload)
 
     } else if (((omask() & KP_SCAN)==0) && (ispace_ndim==1)) { // Promote code_block to loop
 
-        Skeleton loop(plaid_, "skel.loop"); 
-        loop["INIT"] = _declare_init(_int64(), "idx"+to_string(ispace_axis),  "0");
-        loop["COND"] =_lt(
-            "idx"+to_string(ispace_axis),
-            "iterspace_shape_d"+ to_string(ispace_axis)
-        );
-        loop["INCR"] = _inc("idx" + to_string(ispace_axis));
-        loop["PROLOG"] = code_block["PROLOG"];
+        /*
+        Emits code on the form:
+        #pragma omp parallel - this is the "pblock"
+        {
+            #pragma omp for schedule(static) - this is the ploop
+            {
+                // Chunked bound
+                #pragma omp simd [reduction(...)] - this is the vloop
+                {
+                }
+            }
+        }
+        */
 
-        loop["PRAGMA"] += "#pragma omp for";
-
+        Skeleton vloop(plaid_, "skel.loop");    // Vectorized loop
+        vloop["PROLOG"] = _line(_declare_init(
+            _const(_int64()),
+            "idx"+to_string(ispace_axis)+"_chunked_bound",
+            _min(
+                "iterspace_shape_d"+to_string(ispace_axis),
+                _add("idx"+to_string(ispace_axis)+"_chunked", "KP_CHUNKSIZE")
+            )
+        ));
         #ifdef CAPE_WITH_OMP_SIMD
-        // TODO: This probably won't work, since reduction is "private" to the executing thread
-        //loop["PRAGMA"] += " simd";
-        //loop["PRAGMA"] += " "+simd_reduction_annotation();
+        vloop["PRAGMA"] += "#pragma omp simd";
+        vloop["PRAGMA"] += " "+simd_reduction_annotation();
         #endif
 
-        loop["PRAGMA"] += " schedule(static)";
-        loop["BODY"] = code_block["BODY"];
-        loop["EPILOG"] = code_block["EPILOG"];
+        vloop["INIT"] = _declare_init(_int64(), "idx"+to_string(ispace_axis),  "idx"+to_string(ispace_axis)+"_chunked");
+        vloop["COND"] =_lt(
+            "idx"+ to_string(ispace_axis),
+            "idx"+ to_string(ispace_axis)+"_chunked_bound"
+        );
+        vloop["INCR"] = _inc("idx" + to_string(ispace_axis));
+        vloop["BODY"] = code_block["BODY"];
 
-        code_block.reset();
-        code_block["PRAGMA"] = "#pragma omp parallel";
-        code_block["BODY"] = loop.emit();
+        Skeleton ploop(plaid_, "skel.loop");    // Parallel loop
+        ploop["INIT"] = _declare_init(_int64(), "idx"+to_string(ispace_axis)+"_chunked",  "0");
+        ploop["COND"] =_lt(
+            "idx"+to_string(ispace_axis)+"_chunked",
+            "iterspace_shape_d"+ to_string(ispace_axis)
+        );
+        ploop["INCR"] = "idx" + to_string(ispace_axis)+ "_chunked += KP_CHUNKSIZE";
 
-        krn["BODY"] = code_block.emit();
+        ploop["PRAGMA"] += "#pragma omp for";
+        ploop["PRAGMA"] += " schedule(static)";
+        ploop["PROLOG"] = code_block["PROLOG"];
+        ploop["EPILOG"] = code_block["EPILOG"];
+        ploop["BODY"] = vloop.emit();
+
+        Skeleton pblock(plaid_, "skel.block");
+        pblock.reset();                         // Parallel block
+        pblock["PRAGMA"] = "#pragma omp parallel";
+        pblock["BODY"] = ploop.emit();
+
+        krn["BODY"] = pblock.emit();
 
     } else {                                        // Promote code_block to nested loop
 

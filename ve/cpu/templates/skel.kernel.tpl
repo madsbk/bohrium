@@ -34,6 +34,10 @@ static inline int omp_get_num_threads() { return 1; }
 #define CPU_MAXDIM 16
 #endif
 
+#ifndef KP_CHUNKSIZE
+#define KP_CHUNKSIZE 512
+#endif
+
 #ifndef KP_CODEGEN_MISC
 #define KP_CODEGEN_MISC 1
 typedef union philox2x32_as_1x64 {
