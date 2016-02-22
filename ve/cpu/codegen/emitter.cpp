@@ -979,11 +979,11 @@ string Emitter::generate_source(bool offload)
 
     //
     // Start with a code-block, handling scalars
-    Skeleton code_block(plaid_, "skel.block");  // Start with a code-block
+    Skeleton scalar_block(plaid_, "skel.block");  // Start with a code-block
 
-    declare_init_opds(code_block, "PROLOG");    // Declare operand variables and offset them
+    declare_init_opds(scalar_block, "PROLOG");    // Declare operand variables and offset them
 
-    emit_operations(code_block);                // Fills PROLOG, BODY, EPILOG
+    emit_operations(scalar_block);                // Fills PROLOG, BODY, EPILOG
 
     set<uint64_t> written;                      // Write scalars back to memory
     for(kernel_tac_iter tit=tacs_begin();
@@ -995,7 +995,7 @@ string Emitter::generate_source(bool offload)
         if (((tac.op & (KP_MAP | KP_ZIP | KP_GENERATE))>0) and \
             ((opd.meta().layout & KP_SCALAR)>0) and \
             (written.find(tac.out)==written.end())) {
-            code_block["EPILOG"] += _line(_assign(
+            scalar_block["EPILOG"] += _line(_assign(
                 _deref(_add(opd.buffer_data(), opd.start())),
                 opd.walker_val()
             ));
@@ -1006,9 +1006,9 @@ string Emitter::generate_source(bool offload)
     if (((ispace_layout & (KP_SCALAR|KP_SCALAR_CONST|KP_CONTRACTABLE))>0) &&
         ((omask() & KP_ACCUMULATION)==0)) {                 // Accumulations aren't allowed here
                                                             // They should be filtered out.
-        krn["BODY"] = code_block.emit();
+        krn["BODY"] = scalar_block.emit();
 
-    } else if (((omask() & KP_SCAN)==0) && (ispace_ndim==1)) { // Promote code_block to loop
+    } else if (((omask() & KP_SCAN)==0) && (ispace_ndim==1)) { // Promote scalar_block to loop
 
         /*
         Emits code on the form:
@@ -1044,7 +1044,7 @@ string Emitter::generate_source(bool offload)
             "idx"+ to_string(ispace_axis)+"_chunked_bound"
         );
         vloop["INCR"] = _inc("idx" + to_string(ispace_axis));
-        vloop["BODY"] = code_block["BODY"];
+        vloop["BODY"] = scalar_block["BODY"];
 
         Skeleton ploop(plaid_, "skel.loop");    // Parallel loop
         ploop["INIT"] = _declare_init(_int64(), "idx"+to_string(ispace_axis)+"_chunked",  "0");
@@ -1056,8 +1056,8 @@ string Emitter::generate_source(bool offload)
 
         ploop["PRAGMA"] += "#pragma omp for";
         ploop["PRAGMA"] += " schedule(static)";
-        ploop["PROLOG"] = code_block["PROLOG"];
-        ploop["EPILOG"] = code_block["EPILOG"];
+        ploop["PROLOG"] = scalar_block["PROLOG"];
+        ploop["EPILOG"] = scalar_block["EPILOG"];
         ploop["BODY"] = vloop.emit();
 
         Skeleton pblock(plaid_, "skel.block");
@@ -1067,9 +1067,9 @@ string Emitter::generate_source(bool offload)
 
         krn["BODY"] = pblock.emit();
 
-    } else {                                        // Promote code_block to nested loop
+    } else {                                        // Promote scalar_block to nested loop
 
-        Skeleton loop(plaid_, "skel.loop");         // Construct inner-most loop
+        Skeleton loop(plaid_, "skel.loop");         // Construct axis loop
         loop["INIT"] = _declare_init(_int64(), "idx"+to_string(ispace_axis),  "0");
         loop["COND"] =_lt(
             "idx"+to_string(ispace_axis),
@@ -1082,9 +1082,9 @@ string Emitter::generate_source(bool offload)
         loop["PRAGMA"] += " "+simd_reduction_annotation();
         #endif
 
-        loop["PROLOG"] = code_block["PROLOG"];
-        loop["BODY"] = code_block["BODY"];
-        loop["EPILOG"] = code_block["EPILOG"];
+        loop["PROLOG"] = scalar_block["PROLOG"];
+        loop["BODY"] = scalar_block["BODY"];
+        loop["EPILOG"] = scalar_block["EPILOG"];
 
         krn["BODY"] = loop.emit();                  // Overwrite the code-block in kernel BODY
 
