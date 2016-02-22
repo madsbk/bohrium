@@ -15,6 +15,14 @@ gnu:
 	$(eval CC := gcc)
 	$(eval CXX := g++)
 
+gnu49:
+	$(eval CC := gcc-4.9)
+	$(eval CXX := g++)
+
+gnu53:
+	$(eval CC := gcc-5.3)
+	$(eval CXX := g++)
+
 pgi:
 	$(eval CC := pgcc)
 	$(eval CXX := g++)
