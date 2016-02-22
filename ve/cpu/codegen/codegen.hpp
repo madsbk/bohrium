@@ -475,6 +475,8 @@ public:
 
     kp::core::Block& block(void);
 
+    std::string simd_reduction_annotation(void);
+
     std::string oper_description(kp_tac tac);
     std::string oper_neutral_element(KP_OPERATOR oper, KP_ETYPE etype);
     std::string oper(KP_OPERATOR oper, KP_ETYPE etype, std::string in1, std::string in2);

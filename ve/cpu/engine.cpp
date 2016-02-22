@@ -138,6 +138,11 @@ string Engine::text()
     #else
     ss << "  CAPE_WITH_OMP_ATOMIC: OFF" << endl;
     #endif
+    #ifdef CAPE_WITH_OMP_SIMD
+    ss << "  CAPE_WITH_OMP_SIMD: ON" << endl;
+    #else
+    ss << "  CAPE_WITH_OMP_SIMD: OFF" << endl;
+    #endif
     #ifdef CAPE_WITH_INTEL_LEO
     ss << "  CAPE_WITH_INTEL_LEO: ON" << endl;
     #else

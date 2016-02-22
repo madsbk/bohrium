@@ -855,6 +855,59 @@ void Emitter::emit_operations(Skeleton& skel)
     }
 }
 
+string Emitter::simd_reduction_annotation(void)
+{
+    std::vector<string> annotations;
+
+    for(kernel_tac_iter tit=tacs_begin();
+        tit!=tacs_end();
+        ++tit) {
+        kp_tac& tac = **tit;
+
+        switch(tac.op) {
+        case KP_REDUCE_COMPLETE:
+        case KP_REDUCE_PARTIAL:
+            switch(tac.oper) {
+            case KP_ADD:
+                annotations.push_back("+:"+operand_glb(tac.in1).accu_private());
+                break;
+            case KP_MULTIPLY:
+                annotations.push_back("*:"+operand_glb(tac.in1).accu_private());
+                break;
+            case KP_LOGICAL_AND:
+                annotations.push_back("&&:"+operand_glb(tac.in1).accu_private());
+                break;
+            case KP_BITWISE_AND:
+                annotations.push_back("&:"+operand_glb(tac.in1).accu_private());
+                break;
+            case KP_LOGICAL_OR:
+                annotations.push_back("||:"+operand_glb(tac.in1).accu_private());
+                break;
+            case KP_BITWISE_OR:
+                annotations.push_back("|:"+operand_glb(tac.in1).accu_private());
+                break;
+            default:
+                break;
+            }
+            break;
+        default:
+            break;
+        }
+    }
+    
+    if (annotations.size()>0) {
+        stringstream ss;
+        ss << "reduction(";
+        for(std::vector<string>::iterator it=annotations.begin(); it!=annotations.end(); ++it) {
+            ss << *it;
+        }
+        ss << ")";
+        return ss.str();
+    } else {
+        return "";
+    }
+}
+
 string Emitter::generate_source(bool offload)
 {
     if ((omask() & KP_ARRAY_OPS)==0) { // There must be at lest one array operation
@@ -965,7 +1018,15 @@ string Emitter::generate_source(bool offload)
         );
         loop["INCR"] = _inc("idx" + to_string(ispace_axis));
         loop["PROLOG"] = code_block["PROLOG"];
-        loop["PRAGMA"] = "#pragma omp for schedule(static)";
+
+        loop["PRAGMA"] += "#pragma omp for";
+
+        #ifdef CAPE_WITH_OMP_SIMD
+        loop["PRAGMA"] += " simd";
+        loop["PRAGMA"] += " "+simd_reduction_annotation();
+        #endif
+
+        loop["PRAGMA"] += " schedule(static)";
         loop["BODY"] = code_block["BODY"];
         loop["EPILOG"] = code_block["EPILOG"];
 
@@ -984,6 +1045,12 @@ string Emitter::generate_source(bool offload)
             "iterspace_shape_d"+ to_string(ispace_axis)
         );
         loop["INCR"] = _inc("idx" + to_string(ispace_axis));
+
+        #ifdef CAPE_WITH_OMP_SIMD
+        loop["PRAGMA"] += "#pragma omp simd";
+        loop["PRAGMA"] += " "+simd_reduction_annotation();
+        #endif
+
         loop["PROLOG"] = code_block["PROLOG"];
         loop["BODY"] = code_block["BODY"];
         loop["EPILOG"] = code_block["EPILOG"];

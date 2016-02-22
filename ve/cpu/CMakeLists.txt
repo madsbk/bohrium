@@ -113,6 +113,7 @@ if (NOT OpenACC)
 endif()
 
 check_c_compiler_flag(-O3 FLAG_03_FOUND)                            # Highly RECOMMENDED flags
+check_c_compiler_flag(-fno-math-errno FLAG_NO_MATH_ERRNO_FOUND)
 check_c_compiler_flag(-march=native FLAG_MARCH_NATIVE_FOUND)
 check_c_compiler_flag("--param vect-max-version-for-alias-checks=100" PARAM_VECTMAX_FOUND)
 
@@ -140,7 +141,29 @@ elseif(OPENMP_FOUND)                                                # OpenMP
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")         # Enable compilation with OpenMP
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
 
-    check_c_compiler_flag(-fopenmp-simd FLAG_OPENMP_SIMD_FOUND)     # OpenMP - SIMD
+    check_c_compiler_flag(-fopenmp-simd FLAG_OPENMP_SIMD_FOUND)     # OpenMP - SIMD flag
+    if (FLAG_OPENMP_SIMD_FOUND)
+        set(CMAKE_REQUIRED_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS} -fopenmp-simd")  # OpenMP - SIMD annotation
+    else()
+        set(CMAKE_REQUIRED_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")  # OpenMP - SIMD annotation
+    endif()
+    check_c_source_compiles( "
+    #include <omp.h>
+    int main(void){
+        int acc = 0;
+        int i;
+        #pragma omp simd reduction(+:acc)
+        for(i=0; i<10; i++) {
+            acc = acc + 1;
+        }
+        return 0;
+    }" OPENMP_SIMD_FOUND)
+
+    message("ATOMIC(${OPENMP_ATOMIC_FOUND}) SIMD-A([${OPENMP_SIMD_FOUND}) SIMD-F(${FLAG_OPENMP_SIMD_FOUND})")
+
+    if (OPENMP_SIMD_FOUND)    # Enable codegen "#pragma omp simd [reduction(...)]"
+        add_definitions(-DCAPE_WITH_OMP_SIMD)
+    endif()
 
     find_package(IntelLEO COMPONENTS bohrium)                       # OpenMP - LEO
     set_package_properties(IntelLEO PROPERTIES TYPE RECOMMENDED PURPOSE "For experimental support for offloading to MIC in CPU VE.")
@@ -226,6 +249,9 @@ else()
     # Optimizations
     if (FLAG_03_FOUND)                                                      # Optimization Level
         set(VE_CPU_COMPILER_FLG "${VE_CPU_COMPILER_FLG} -O3")
+    endif()
+    if (FLAG_NO_MATH_ERRNO_FOUND)
+        set(VE_CPU_COMPILER_FLG "${VE_CPU_COMPILER_FLG} -fno-math-errno")
     endif()
     if (FLAG_MARCH_NATIVE_FOUND)                                            # Machine specific code
         set(VE_CPU_COMPILER_FLG "${VE_CPU_COMPILER_FLG} -march=native")
