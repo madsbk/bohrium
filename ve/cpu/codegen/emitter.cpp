@@ -1022,8 +1022,8 @@ string Emitter::generate_source(bool offload)
         loop["PRAGMA"] += "#pragma omp for";
 
         #ifdef CAPE_WITH_OMP_SIMD
-        loop["PRAGMA"] += " simd";
         // TODO: This probably won't work, since reduction is "private" to the executing thread
+        //loop["PRAGMA"] += " simd";
         //loop["PRAGMA"] += " "+simd_reduction_annotation();
         #endif
 
