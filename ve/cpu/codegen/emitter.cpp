@@ -1059,8 +1059,7 @@ string Emitter::generate_source(bool offload)
         ploop["EPILOG"] = scalar_block["EPILOG"];
         ploop["BODY"] = vloop.emit();
 
-        Skeleton pblock(plaid_, "skel.block");
-        pblock.reset();                         // Parallel block
+        Skeleton pblock(plaid_, "skel.block");  // Parallel block
         pblock["PRAGMA"] = "#pragma omp parallel";
         pblock["BODY"] = ploop.emit();
 
@@ -1068,54 +1067,70 @@ string Emitter::generate_source(bool offload)
 
     } else {                                        // Promote scalar_block to nested loop
 
-        // TODO: split this into vloop and ploop
-        Skeleton loop(plaid_, "skel.loop");         // Construct axis loop
-        loop["INIT"] = _declare_init(_int64(), "idx"+to_string(ispace_axis),  "0");
-        loop["COND"] =_lt(
-            "idx"+to_string(ispace_axis),
-            "iterspace_shape_d"+ to_string(ispace_axis)
-        );
-        loop["INCR"] = _inc("idx" + to_string(ispace_axis));
-
+        Skeleton vloop(plaid_, "skel.loop");         // Construct vectorized "axis" loop
+        vloop["PROLOG"] += scalar_block["PROLOG"];
+        vloop["PROLOG"] += _line(_declare_init(
+            _const(_int64()),
+            "idx"+to_string(ispace_axis)+"_chunked_bound",
+            _min(
+                "iterspace_shape_d"+to_string(ispace_axis),
+                _add("idx"+to_string(ispace_axis)+"_chunked", "KP_CHUNKSIZE")
+            )
+        ));
         #ifdef CAPE_WITH_OMP_SIMD
-        loop["PRAGMA"] += "#pragma omp simd";
-        loop["PRAGMA"] += " "+simd_reduction_annotation();
+        vloop["PRAGMA"] += "#pragma omp simd";
+        vloop["PRAGMA"] += " "+simd_reduction_annotation();
         #endif
 
-        loop["PROLOG"] = scalar_block["PROLOG"];
-        loop["BODY"] = scalar_block["BODY"];
-        loop["EPILOG"] = scalar_block["EPILOG"];
+        vloop["INIT"] = _declare_init(_int64(), "idx"+to_string(ispace_axis),  "idx"+to_string(ispace_axis)+"_chunked");
+        vloop["COND"] =_lt(
+            "idx"+ to_string(ispace_axis),
+            "idx"+ to_string(ispace_axis)+"_chunked_bound"
+        );
+        vloop["INCR"] = _inc("idx" + to_string(ispace_axis));
 
-        krn["BODY"] = loop.emit();                  // Overwrite the code-block in kernel BODY
+        vloop["BODY"] = scalar_block["BODY"];
+        vloop["EPILOG"] = scalar_block["EPILOG"];
 
-        vector<int64_t> outer_axes;                 // Determine the outer axes
+        vector<int64_t> axes_order;                 // Determine the outer axes
+        axes_order.push_back(ispace_axis);
         for(int64_t axis=ispace_ndim-1; axis>=0; --axis) {
             if (axis==ispace_axis) {
                 continue;
             }
-            outer_axes.push_back(axis);
+            axes_order.push_back(axis);
         }
                                                     // Generate the nested loop construct
-        for(vector<int64_t>::iterator idx=outer_axes.begin(); idx!=outer_axes.end(); ++idx) {
+        for(vector<int64_t>::iterator idx=axes_order.begin(); idx!=axes_order.end(); ++idx) {
             Skeleton nloop(plaid_, "skel.loop");
    
-            if (*idx==outer_axes.back()) {          // Add "omp parallel" to outermost loop
+            if (*idx==axes_order.back()) {          // Add "omp parallel" to outermost loop
                 nloop["PRAGMA"] = "#pragma omp parallel for schedule(static)";
-                if (ispace_ndim > 2) {              // Annotate "collapse"
-                    nloop["PRAGMA"] += " collapse(" + to_string(ispace_ndim-1) + ")";
+                if (ispace_ndim > 1) {              // Annotate "collapse"
+                    nloop["PRAGMA"] += " collapse(" + to_string(ispace_ndim) + ")";
                 }
             }
- 
-            nloop["INIT"] = _declare_init(_int64(), "idx"+to_string(*idx),  "0");
-            nloop["COND"] =_lt(
-                "idx"+to_string(*idx),
-                "iterspace_shape_d"+ to_string(*idx)
-            );
-            nloop["INCR"] = _inc("idx" + to_string(*idx));
 
-            nloop["BODY"] = krn["BODY"];
+            if (*idx==axes_order.front()) {  // Add vectorized loop to innermost
+                nloop["INIT"] = _declare_init(_int64(), "idx"+to_string(ispace_axis)+"_chunked",  "0");
+                nloop["COND"] =_lt(
+                    "idx"+to_string(ispace_axis)+"_chunked",
+                    "iterspace_shape_d"+ to_string(ispace_axis)
+                );
+                nloop["INCR"] = "idx" + to_string(ispace_axis)+ "_chunked += KP_CHUNKSIZE";
+                nloop["BODY"] = vloop.emit();
+            } else {
+                nloop["INIT"] = _declare_init(_int64(), "idx"+to_string(*idx),  "0");
+                nloop["COND"] =_lt(
+                    "idx"+to_string(*idx),
+                    "iterspace_shape_d"+ to_string(*idx)
+                );
+                nloop["INCR"] = _inc("idx" + to_string(*idx));
 
+                nloop["BODY"] = krn["BODY"];
+            }
             krn["BODY"] = nloop.emit();
+        
         }
     }
 
