@@ -65,17 +65,14 @@ enum FuseModel
  * broadcast, reduction, extension methods, etc. */
     SAME_SHAPE,
 
-/* Like same shape but includes range */
-    SAME_SHAPE_RANGE,
-
-/* Like same shape but includes random */
-    SAME_SHAPE_RANDOM,
-
-/* Like same shape but includes random */
-    SAME_SHAPE_RANGE_RANDOM,
-
 /* Like same shape but includes random, range, and reduction to scalar */
-    SAME_SHAPE_GENERATE_1DREDUCE,
+    SAME_SHAPE_STREAM_CREDUCE,
+
+/* Like same shape but includes random, range, reduction to scalar,
+   reductions at one level. That is, fuses operations that operate
+   on the output of a reduction.
+    */
+    SAME_SHAPE_STREAM_CREDUCE_PREDUCE_ONCE,
 
 /* The number of models in this enum */
     NUM_OF_MODELS

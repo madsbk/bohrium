@@ -61,12 +61,13 @@ bh_error bh_ve_cpu_init(const char *name)
     char* env = getenv("BH_FUSE_MODEL");                    // Set the fuse-model
     if (NULL != env) {
         string env_str(env);
-        if (!env_str.compare("same_shape_generate_1dreduce")) {
+        if ((!env_str.compare("same_shape_stream_creduce")) &&
+            (!env_str.compare("same_shape_stream_creduce_preduce_once"))) {
             fprintf(stderr, "[CPU-VE] Warning! unsupported fuse model: '%s"
                     "', it may not work.\n", env);
         }
     } else {
-        setenv("BH_FUSE_MODEL", "SAME_SHAPE_GENERATE_1DREDUCE", 1);
+        setenv("BH_FUSE_MODEL", "SAME_SHAPE_STREAM_CREDUCE_PREDUCE_ONCE", 1);
     }
     if (BH_SUCCESS != bh_component_init(&myself, name)) {   // Initialize engine
         fprintf(stderr, "[CPU-VE] Failed initializing component\n");

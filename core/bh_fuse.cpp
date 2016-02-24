@@ -135,132 +135,114 @@ static bool fuse_same_shape(const bh_instruction *a, const bh_instruction *b)
     return fuse_broadest(a, b);
 }
 
-static bool fuse_same_shape_range(const bh_instruction *a, const bh_instruction *b)
-{
-    if(bh_opcode_is_system(a->opcode) || bh_opcode_is_system(b->opcode))
-        return true;
-
-    if((a->opcode != BH_RANGE and not bh_opcode_is_elementwise(a->opcode)) or
-       (b->opcode != BH_RANGE and not bh_opcode_is_elementwise(b->opcode)))
-        return false;
-
-    const int a_nop = bh_operands(a->opcode);
-    const int b_nop = bh_operands(b->opcode);
-    const bh_intp *shape = a->operand[0].shape;
-    const bh_intp ndim = a->operand[0].ndim;
-    for(int i=1; i<a_nop; ++i)
-    {
-        if(bh_is_constant(&a->operand[i]))
-            continue;
-        if(ndim != a->operand[i].ndim)
-            return false;
-        for(bh_intp j=0; j<ndim; ++j)
-        {
-            if(a->operand[i].shape[j] != shape[j])
-                return false;
-        }
-    }
-    for(int i=0; i<b_nop; ++i)
-    {
-        if(bh_is_constant(&b->operand[i]))
-            continue;
-        if(ndim != b->operand[i].ndim)
-            return false;
-        for(bh_intp j=0; j<ndim; ++j)
-        {
-            if(b->operand[i].shape[j] != shape[j])
-                return false;
-        }
-    }
-    return fuse_broadest(a, b);
-}
-
-static bool fuse_same_shape_random(const bh_instruction *a, const bh_instruction *b)
-{
-    if(bh_opcode_is_system(a->opcode) || bh_opcode_is_system(b->opcode))
-        return true;
-
-    if((a->opcode != BH_RANDOM and not bh_opcode_is_elementwise(a->opcode)) or
-       (b->opcode != BH_RANDOM and not bh_opcode_is_elementwise(b->opcode)))
-        return false;
-
-    const int a_nop = bh_operands(a->opcode);
-    const int b_nop = bh_operands(b->opcode);
-    const bh_intp *shape = a->operand[0].shape;
-    const bh_intp ndim = a->operand[0].ndim;
-    for(int i=1; i<a_nop; ++i)
-    {
-        if(bh_is_constant(&a->operand[i]))
-            continue;
-        if(ndim != a->operand[i].ndim)
-            return false;
-        for(bh_intp j=0; j<ndim; ++j)
-        {
-            if(a->operand[i].shape[j] != shape[j])
-                return false;
-        }
-    }
-    for(int i=0; i<b_nop; ++i)
-    {
-        if(bh_is_constant(&b->operand[i]))
-            continue;
-        if(ndim != b->operand[i].ndim)
-            return false;
-        for(bh_intp j=0; j<ndim; ++j)
-        {
-            if(b->operand[i].shape[j] != shape[j])
-                return false;
-        }
-    }
-    return fuse_broadest(a, b);
-}
-
-static bool fuse_same_shape_range_random(const bh_instruction *a, const bh_instruction *b)
-{
-    if(bh_opcode_is_system(a->opcode) || bh_opcode_is_system(b->opcode))
-        return true;
-
-    if((a->opcode != BH_RANGE and a->opcode != BH_RANDOM and not bh_opcode_is_elementwise(a->opcode)) or
-       (b->opcode != BH_RANGE and b->opcode != BH_RANDOM and not bh_opcode_is_elementwise(b->opcode)))
-        return false;
-
-    const int a_nop = bh_operands(a->opcode);
-    const int b_nop = bh_operands(b->opcode);
-    const bh_intp *shape = a->operand[0].shape;
-    const bh_intp ndim = a->operand[0].ndim;
-    for(int i=1; i<a_nop; ++i)
-    {
-        if(bh_is_constant(&a->operand[i]))
-            continue;
-        if(ndim != a->operand[i].ndim)
-            return false;
-        for(bh_intp j=0; j<ndim; ++j)
-        {
-            if(a->operand[i].shape[j] != shape[j])
-                return false;
-        }
-    }
-    for(int i=0; i<b_nop; ++i)
-    {
-        if(bh_is_constant(&b->operand[i]))
-            continue;
-        if(ndim != b->operand[i].ndim)
-            return false;
-        for(bh_intp j=0; j<ndim; ++j)
-        {
-            if(b->operand[i].shape[j] != shape[j])
-                return false;
-        }
-    }
-    return fuse_broadest(a, b);
-}
-
 static bool is_scalar(const bh_view* view)
 {
     return ((view->ndim == 1) and (view->shape[0]==1));
 }
 
-static bool fuse_same_shape_generate_1dreduce(const bh_instruction *a, const bh_instruction *b)
+static bool fuse_same_shape_stream_creduce(const bh_instruction *a, const bh_instruction *b)
+{
+    if(bh_opcode_is_system(a->opcode) || bh_opcode_is_system(b->opcode))
+        return true;
+
+    if((a->opcode != BH_RANGE and a->opcode != BH_RANDOM \
+        and not bh_opcode_is_elementwise(a->opcode)      \
+        and not bh_opcode_is_reduction(a->opcode))
+        or                                               \
+       (b->opcode != BH_RANGE and b->opcode != BH_RANDOM \
+        and not bh_opcode_is_elementwise(b->opcode)      \
+        and not bh_opcode_is_reduction(b->opcode))) {
+        return false;
+    }
+
+    //  Check that the output of instruction "a" has the shape
+    //  shape as all other operands.
+    const int a_nop = bh_operands(a->opcode);
+    const int b_nop = bh_operands(b->opcode);
+    // a is reduction, b is reduction
+    if (bh_opcode_is_reduction(a->opcode) and bh_opcode_is_reduction(b->opcode)) {
+        return false;
+    // a is NOT reduction, b is reduction
+    } else if (not bh_opcode_is_reduction(a->opcode) and bh_opcode_is_reduction(b->opcode)) {
+        const bh_intp *red_shape = b->operand[1].shape;
+        const bh_intp red_ndim   = b->operand[1].ndim;
+
+        // check that a does not depend on reduce-result of b
+        for(int oidx=0; oidx<a_nop; ++oidx) {
+            if(bh_is_constant(&a->operand[oidx])) {
+                continue;
+            }
+            if (a->operand[oidx].base == b->operand[0].base) {
+                return false;
+            }
+        }
+
+        for(int oidx=0; oidx<a_nop; ++oidx) {
+            if(bh_is_constant(&a->operand[oidx])) {
+                continue;
+            }
+            if(red_ndim != a->operand[oidx].ndim) {
+                return false;
+            }
+            for(bh_intp dim=0; dim<red_ndim; ++dim) {
+                if(a->operand[oidx].shape[dim] != red_shape[dim]) {
+                    return false;
+                }
+            }
+        }
+    // a is reduction, b is NOT reduction
+    } else if (bh_opcode_is_reduction(a->opcode) and not bh_opcode_is_reduction(b->opcode)) {
+        const bh_intp *red_shape = a->operand[1].shape;
+        const bh_intp red_ndim   = a->operand[1].ndim;
+
+        // check that b does not depend on reduce-result of a
+        for(int oidx=0; oidx<b_nop; ++oidx) {
+            if(bh_is_constant(&b->operand[oidx])) {
+                continue;
+            }
+            if (b->operand[oidx].base == a->operand[0].base) {
+                return false;
+            }
+        }
+
+        for(int oidx=0; oidx<b_nop; ++oidx) {
+            if(bh_is_constant(&b->operand[oidx])) {
+                continue;
+            }
+            if(red_ndim != b->operand[oidx].ndim) {
+                return false;
+            }
+            for(bh_intp dim=0; dim<red_ndim; ++dim) {
+                if(b->operand[oidx].shape[dim] != red_shape[dim]) {
+                    return false;
+                }
+            }
+        }
+    // everything else...
+    } else {
+        const bh_intp *shape = a->operand[0].shape;
+        const bh_intp ndim = a->operand[0].ndim;
+
+        if (not is_scalar(&a->operand[0])) {
+            for(int i=0; i<b_nop; ++i) {
+                if (bh_is_constant(&b->operand[i]))
+                    continue;
+                if (ndim != b->operand[i].ndim) {
+                    return false;
+                }
+                for (bh_intp j=0; j<ndim; ++j) {
+                    if(b->operand[i].shape[j] != shape[j]) {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    
+    return fuse_broadest(a, b);
+}
+
+static bool fuse_same_shape_stream_creduce_preduce_once(const bh_instruction *a, const bh_instruction *b)
 {
     if(bh_opcode_is_system(a->opcode) || bh_opcode_is_system(b->opcode))
         return true;
@@ -427,17 +409,11 @@ void fuse_model_text(FuseModel fuse_model, string &output)
     case SAME_SHAPE:
         output = "same_shape";
         break;
-    case SAME_SHAPE_RANGE:
-        output = "same_shape_range";
+    case SAME_SHAPE_STREAM_CREDUCE:
+        output = "same_shape_stream_creduce";
         break;
-    case SAME_SHAPE_RANDOM:
-        output = "same_shape_random";
-        break;
-    case SAME_SHAPE_RANGE_RANDOM:
-        output = "same_shape_range_random";
-        break;
-    case SAME_SHAPE_GENERATE_1DREDUCE:
-        output = "same_shape_generate_1dreduce";
+    case SAME_SHAPE_STREAM_CREDUCE_PREDUCE_ONCE:
+        output = "same_shape_stream_creduce_preduce_once";
         break;
     default:
         output = "unknown";
@@ -468,14 +444,10 @@ bool check_fusible(const bh_instruction *a, const bh_instruction *b)
         return fuse_no_xsweep_scalar_seperate_shape_match(a,b);
     case SAME_SHAPE:
         return fuse_same_shape(a,b);
-    case SAME_SHAPE_RANGE:
-        return fuse_same_shape_range(a,b);
-    case SAME_SHAPE_RANDOM:
-        return fuse_same_shape_random(a,b);
-    case SAME_SHAPE_RANGE_RANDOM:
-        return fuse_same_shape_range_random(a,b);
-    case SAME_SHAPE_GENERATE_1DREDUCE:
-        return fuse_same_shape_generate_1dreduce(a,b);
+    case SAME_SHAPE_STREAM_CREDUCE:
+        return fuse_same_shape_stream_creduce(a,b);
+    case SAME_SHAPE_STREAM_CREDUCE_PREDUCE_ONCE:
+        return fuse_same_shape_stream_creduce_preduce_once(a,b);
     default:
         throw runtime_error("No fuse module is selected!");
     }

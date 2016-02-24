@@ -212,10 +212,8 @@ static InstrHash getInstrHash(FuseModel fuseModel)
     case NO_XSWEEP_SCALAR_SEPERATE_SHAPE_MATCH:
         return &hashScalarShapeidOpidSweepdim;
     case SAME_SHAPE:
-    case SAME_SHAPE_RANGE:
-    case SAME_SHAPE_RANDOM:
-    case SAME_SHAPE_RANGE_RANDOM:
-    case SAME_SHAPE_GENERATE_1DREDUCE:
+    case SAME_SHAPE_STREAM_CREDUCE:
+    case SAME_SHAPE_STREAM_CREDUCE_PREDUCE_ONCE:
         return &hashOpcodeOpidShapeidSweepdim;
     default:
         throw runtime_error("Could not find valid hash function for fuse model.");
