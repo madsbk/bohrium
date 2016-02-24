@@ -1068,7 +1068,8 @@ string Emitter::generate_source(bool offload)
 
     } else {                                        // Promote scalar_block to nested loop
 
-        // TODO: split this into vloop and ploop
+        // NOTE: The innermost loop is intensionally not thread-parallel
+
         Skeleton loop(plaid_, "skel.loop");         // Construct axis loop
         loop["INIT"] = _declare_init(_int64(), "idx"+to_string(ispace_axis),  "0");
         loop["COND"] =_lt(
@@ -1087,6 +1088,9 @@ string Emitter::generate_source(bool offload)
         loop["EPILOG"] = scalar_block["EPILOG"];
 
         krn["BODY"] = loop.emit();                  // Overwrite the code-block in kernel BODY
+
+        // TODO: Add some "stream" operations here.
+
 
         vector<int64_t> outer_axes;                 // Determine the outer axes
         for(int64_t axis=ispace_ndim-1; axis>=0; --axis) {
