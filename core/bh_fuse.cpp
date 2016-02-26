@@ -244,96 +244,89 @@ static bool fuse_same_shape_stream_creduce(const bh_instruction *a, const bh_ins
 
 static bool fuse_same_shape_stream_creduce_preduce_once(const bh_instruction *a, const bh_instruction *b)
 {
-    if(bh_opcode_is_system(a->opcode) || bh_opcode_is_system(b->opcode))
+    // Accept system opcodes
+    if (bh_opcode_is_system(a->opcode) || bh_opcode_is_system(b->opcode)) {
         return true;
+    }
 
-    if((a->opcode != BH_RANGE and a->opcode != BH_RANDOM \
-        and not bh_opcode_is_elementwise(a->opcode)      \
-        and not bh_opcode_is_reduction(a->opcode))
-        or                                               \
-       (b->opcode != BH_RANGE and b->opcode != BH_RANDOM \
-        and not bh_opcode_is_elementwise(b->opcode)      \
+    // Reject opcodes that aren't: ewise, reduction, range, random.
+    if ((a->opcode != BH_RANGE and \
+        a->opcode != BH_RANDOM and \
+        not bh_opcode_is_elementwise(a->opcode) and \
+        not bh_opcode_is_reduction(a->opcode)) \
+        or \
+       (b->opcode != BH_RANGE and \
+        b->opcode != BH_RANDOM \
+        and not bh_opcode_is_elementwise(b->opcode) \
         and not bh_opcode_is_reduction(b->opcode))) {
         return false;
     }
 
-    //  Check that the output of instruction "a" has the shape
-    //  shape as all other operands.
-    const int a_nop = bh_operands(a->opcode);
-    const int b_nop = bh_operands(b->opcode);
+    const bool a_is_reduction = bh_opcode_is_reduction(a->opcode);
+    const bool b_is_reduction = bh_opcode_is_reduction(b->opcode);
+
     // a is reduction, b is reduction
-    if (bh_opcode_is_reduction(a->opcode) and bh_opcode_is_reduction(b->opcode)) {
+    if (a_is_reduction and b_is_reduction) {
+        // TODO: Add support for multiple reductions as long as they share input-shape
+        printf("a-and-b-red: Nogo.\n");
         return false;
     // a is NOT reduction, b is reduction
-    } else if (not bh_opcode_is_reduction(a->opcode) and bh_opcode_is_reduction(b->opcode)) {
-        const bh_intp *red_shape = b->operand[1].shape;
-        const bh_intp red_ndim   = b->operand[1].ndim;
+    } else if (a_is_reduction or b_is_reduction) {
 
-        // check that a does not depend on reduce-result of b
-        for(int oidx=0; oidx<a_nop; ++oidx) {
-            if(bh_is_constant(&a->operand[oidx])) {
+        const bh_instruction& reduction = a_is_reduction ? *a : *b;
+        const bh_instruction& other = a_is_reduction ? *b : *a;
+        const int other_nop = bh_operands(other.opcode);
+
+        bool depends_on_reduce_result = false;  // Check that 'other' depends on 'reduction'
+        for (int oidx=0; oidx<other_nop; ++oidx) {
+            if (bh_is_constant(&other.operand[oidx])) {
                 continue;
             }
-            if (a->operand[oidx].base == b->operand[0].base) {
+            if (other.operand[oidx].base == reduction.operand[0].base) {
+                depends_on_reduce_result = true;
+                break;
+            }
+        }
+
+        //  Check shape of 'other', it must match:
+        //  * 'reduction' output when it depends on output.
+        //  * 'reduction' input when it does not
+        const bh_intp* reduction_shape = depends_on_reduce_result ? reduction.operand[0].shape : reduction.operand[1].shape;
+        const bh_intp reduction_ndim = depends_on_reduce_result ? reduction.operand[0].ndim : reduction.operand[1].ndim;
+
+        // Since non-reduction operands has same-shape of operands
+        // then we only need to compare with one of them.
+        // We use the output operand since it is always defined.
+        if (reduction_ndim != other.operand[0].ndim) {
+            printf("a-or-b-red: Rejecting because of ndim.\n");
+            return false;
+        }
+        for (bh_intp dim=0; dim<reduction_ndim; ++dim) {
+            if (reduction_shape[dim] != other.operand[0].shape[dim]) {
+                printf("a-or-b-red: Rejecting because of shape.\n");
                 return false;
             }
         }
 
-        for(int oidx=0; oidx<a_nop; ++oidx) {
-            if(bh_is_constant(&a->operand[oidx])) {
-                continue;
-            }
-            if(red_ndim != a->operand[oidx].ndim) {
-                return false;
-            }
-            for(bh_intp dim=0; dim<red_ndim; ++dim) {
-                if(a->operand[oidx].shape[dim] != red_shape[dim]) {
-                    return false;
-                }
-            }
-        }
-    // a is reduction, b is NOT reduction
-    } else if (bh_opcode_is_reduction(a->opcode) and not bh_opcode_is_reduction(b->opcode)) {
-        const bh_intp *red_shape = a->operand[1].shape;
-        const bh_intp red_ndim   = a->operand[1].ndim;
+    // everything else 
+    }  else {
 
-        // check that b does not depend on reduce-result of a
-        for(int oidx=0; oidx<b_nop; ++oidx) {
-            if(bh_is_constant(&b->operand[oidx])) {
-                continue;
-            }
-            if (b->operand[oidx].base == a->operand[0].base) {
-                return false;
-            }
-        }
+        const int b_nop = bh_operands(b->opcode);
 
-        for(int oidx=0; oidx<b_nop; ++oidx) {
-            if(bh_is_constant(&b->operand[oidx])) {
-                continue;
-            }
-            if(red_ndim != b->operand[oidx].ndim) {
-                return false;
-            }
-            for(bh_intp dim=0; dim<red_ndim; ++dim) {
-                if(b->operand[oidx].shape[dim] != red_shape[dim]) {
-                    return false;
-                }
-            }
-        }
-    // everything else...
-    } else {
         const bh_intp *shape = a->operand[0].shape;
         const bh_intp ndim = a->operand[0].ndim;
 
         if (not is_scalar(&a->operand[0])) {
-            for(int i=0; i<b_nop; ++i) {
+            for (int i=0; i<b_nop; ++i) {
                 if (bh_is_constant(&b->operand[i]))
                     continue;
                 if (ndim != b->operand[i].ndim) {
+                    printf("else: Rejecting because of ndim.");
                     return false;
                 }
                 for (bh_intp j=0; j<ndim; ++j) {
-                    if(b->operand[i].shape[j] != shape[j]) {
+                    if (b->operand[i].shape[j] != shape[j]) {
+                        printf("else: Rejecting because of shape.");
                         return false;
                     }
                 }
