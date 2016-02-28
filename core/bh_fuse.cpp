@@ -268,7 +268,9 @@ static bool fuse_same_shape_stream_creduce_preduce_once(const bh_instruction *a,
     // a is reduction, b is reduction
     if (a_is_reduction and b_is_reduction) {
         // TODO: Add support for multiple reductions as long as they share input-shape
-        printf("a-and-b-red: Nogo.\n");
+        //       This will require expansion of the CAPE codegen as it currently
+        //       splits the instructions into before/after reduction. This should
+        //       then have proper handling of reduction in/out.
         return false;
     // a is NOT reduction, b is reduction
     } else if (a_is_reduction or b_is_reduction) {
