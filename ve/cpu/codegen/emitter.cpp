@@ -442,34 +442,47 @@ kernel_tac_iter Emitter::tacs_end(void)
     return tacs_.end();
 }
 
-string Emitter::axis_access(int64_t glb_idx, const int64_t axis)
+string Emitter::axis_access(int64_t glb_idx, const int64_t axis, bool axis_walk)
 {
     stringstream ss;
 
     Operand& operand = operand_glb(glb_idx);
 
-    switch(operand.meta().layout) {
-    case KP_CONTIGUOUS:
-    case KP_STRIDED:
-    case KP_CONSECUTIVE:
-        if ((axis == operand.meta().ndim-1) && (operand.meta().stride[axis] == 0)) {
-            ss << _index(operand.walker(), "0");
-        } else if ((axis == operand.meta().ndim-1) && (operand.meta().stride[axis] == 1)) {
-            ss << _index(operand.walker(), "idx"+to_string(axis));
-        } else {
-            ss << _index(
-                operand.walker(),
-                _mul(
-                    "idx"+to_string(axis),
-                    operand.strides()+"_d"+to_string(axis)
-                )
-            );
-        }
-        break;
+    if (axis_walk) {
+        switch(operand.meta().layout) {
+        case KP_CONTIGUOUS:
+        case KP_STRIDED:
+        case KP_CONSECUTIVE:
+            if ((axis == operand.meta().ndim-1) && (operand.meta().stride[axis] == 0)) {
+                ss << _index(operand.walker(), "0");
+            } else if ((axis == operand.meta().ndim-1) && (operand.meta().stride[axis] == 1)) {
+                ss << _index(operand.walker(), "idx"+to_string(axis));
+            } else {
+                ss << _index(
+                    operand.walker(),
+                    _mul(
+                        "idx"+to_string(axis),
+                        operand.strides()+"_d"+to_string(axis)
+                    )
+                );
+            }
+            break;
 
-    default:
-        ss << operand_glb(glb_idx).name();
-        break;
+        default:
+            ss << operand_glb(glb_idx).walker();
+            break;
+        }
+    } else {
+        switch(operand.meta().layout) {
+        case KP_CONTIGUOUS:
+        case KP_STRIDED:
+        case KP_CONSECUTIVE:
+            ss << operand_glb(glb_idx).walker_val();
+            break;
+        default:
+            ss << operand_glb(glb_idx).walker();
+            break;
+        }
     }
 
     return ss.str();
@@ -703,38 +716,49 @@ void Emitter::declare_init_opds(Skeleton& skel, string sect)
     }
 }
 
-void Emitter::emit_operations(Skeleton& skel)
+void Emitter::emit_operations(Skeleton& skel, size_t from, size_t to, bool axis_walk)
 {
     int64_t ispace_axis = iterspace().meta().axis;
 
-    for(kernel_tac_iter tit=tacs_begin();
-        tit!=tacs_end();
-        ++tit) {
-        kp_tac& tac = **tit;
+    for(size_t tac_idx = from; tac_idx <= to; ++tac_idx) {
+        kp_tac& tac = *tacs_[tac_idx];
+
         KP_ETYPE etype = (KP_ABSOLUTE == tac.oper) ?  operand_glb(tac.in1).meta().etype : operand_glb(tac.out).meta().etype;
 
         string out = "ERROR_OUT", in1 = "ERROR_IN1", in2 = "ERROR_IN2";
         switch(tac.op) {
         case KP_ZIP:
-            skel["BODY"] += _assign(
-                axis_access(tac.out, ispace_axis),
-                oper(
-                    tac.oper,
-                    etype,
-                    axis_access(tac.in1, ispace_axis),
-                    axis_access(tac.in2, ispace_axis)
-                )
-            );
+            if (axis_walk) {
+                skel["BODY"] += _assign(
+                    axis_access(tac.out, ispace_axis, axis_walk),
+                    oper(
+                        tac.oper,
+                        etype,
+                        axis_access(tac.in1, ispace_axis, axis_walk),
+                        axis_access(tac.in2, ispace_axis, axis_walk)
+                    )
+                );
+            } else {
+                skel["BODY"] += _assign(
+                    axis_access(tac.out, ispace_axis, axis_walk),
+                    oper(
+                        tac.oper,
+                        etype,
+                        axis_access(tac.in1, ispace_axis, axis_walk),
+                        axis_access(tac.in2, ispace_axis, axis_walk)
+                    )
+                );
+            }
             skel["BODY"] += _end(oper_description(tac));
             break;
 
         case KP_MAP:
             skel["BODY"] += _assign(
-                axis_access(tac.out, ispace_axis),
+                axis_access(tac.out, ispace_axis, axis_walk),
                 oper(
                     tac.oper,
                     etype,
-                    axis_access(tac.in1, ispace_axis),
+                    axis_access(tac.in1, ispace_axis, axis_walk),
                     ""
                 )
             );
@@ -745,18 +769,18 @@ void Emitter::emit_operations(Skeleton& skel)
             switch(tac.oper) {
             case KP_RANDOM: // Random has inputs
                 skel["BODY"] += _assign(
-                    axis_access(tac.out, ispace_axis),
+                    axis_access(tac.out, ispace_axis, axis_walk),
                     oper(
                         tac.oper,
                         etype,
-                        axis_access(tac.in1, ispace_axis),
-                        axis_access(tac.in2, ispace_axis)
+                        axis_access(tac.in1, ispace_axis, axis_walk),
+                        axis_access(tac.in2, ispace_axis, axis_walk)
                     )
                 );
                 break;
             default:
                 skel["BODY"] += _assign(
-                    axis_access(tac.out, ispace_axis),
+                    axis_access(tac.out, ispace_axis, axis_walk),
                     oper(tac.oper, etype, "", "")
                 );
                 break;
@@ -791,7 +815,7 @@ void Emitter::emit_operations(Skeleton& skel)
                     tac.oper,
                     operand_glb(tac.in1).meta().etype,
                     operand_glb(tac.in1).accu_private(),
-                    axis_access(tac.in1, ispace_axis)
+                    axis_access(tac.in1, ispace_axis, axis_walk)
                 )
             );
             skel["BODY"] += _end(oper_description(tac));
@@ -811,16 +835,26 @@ void Emitter::emit_operations(Skeleton& skel)
                     tac.oper,
                     operand_glb(tac.in1).meta().etype,
                     operand_glb(tac.in1).accu_private(),
-                    axis_access(tac.in1, ispace_axis)
+                    axis_access(tac.in1, ispace_axis, axis_walk)
                 )
             );
             skel["BODY"] += _end(oper_description(tac));
 
             // TODO: Needs change when streaming since "out" could be intermediate
-            skel["EPILOG"] += _assign(
-                _deref(operand_glb(tac.out).walker()),
-                operand_glb(tac.in1).accu_private()
-            )+_end(" Write accumulated variable to array.");
+            switch(operand_glb(tac.out).meta().layout) {
+            case KP_CONTRACTABLE:
+                skel["EPILOG"] += _assign(
+                    operand_glb(tac.out).walker(),
+                    operand_glb(tac.in1).accu_private()
+                )+_end(" Write accumulated variable to array.");
+                break;
+            default:
+                skel["EPILOG"] += _assign(
+                    _deref(operand_glb(tac.out).walker()),
+                    operand_glb(tac.in1).accu_private()
+                )+_end(" Write accumulated variable to array.");
+                break;
+            }
             break;
 
         case KP_SCAN:
@@ -837,12 +871,12 @@ void Emitter::emit_operations(Skeleton& skel)
                     tac.oper,
                     operand_glb(tac.in1).meta().etype,
                     operand_glb(tac.in1).accu_private(),
-                    axis_access(tac.in1, ispace_axis)
+                    axis_access(tac.in1, ispace_axis, axis_walk)
                 )
             );
             skel["BODY"] += _end("Accumulatation");
             skel["BODY"] += _assign(
-                axis_access(tac.out, ispace_axis),
+                axis_access(tac.out, ispace_axis, axis_walk),
                 operand_glb(tac.in1).accu_private()
             );
             skel["BODY"] += _end(oper_description(tac));
@@ -941,9 +975,19 @@ string Emitter::generate_source(bool offload)
     krn["HEAD"]    += unpack_iterspace();
     krn["HEAD"]    += unpack_buffers();
     krn["HEAD"]    += unpack_arguments();
+
+    /*
     for(kernel_tac_iter tit=tacs_begin(); tit!=tacs_end(); ++tit) {
         kp_tac& tac = **tit;
+    */
+    size_t from = 0;
+    size_t to = tacs_.size()-1;
 
+    for(size_t tac_idx=0; tac_idx<tacs_.size(); ++tac_idx) {
+        kp_tac& tac = *tacs_[tac_idx];
+        if ((tac.op & (KP_REDUCE_COMPLETE|KP_REDUCE_PARTIAL))>0) {
+            to = tac_idx;
+        }
         if (KP_REDUCE_COMPLETE==tac.op) {
             // Declare and initialize to neutral
             krn["HEAD"] += _line(_declare_init(
@@ -979,18 +1023,17 @@ string Emitter::generate_source(bool offload)
 
     //
     // Start with a code-block, handling scalars
-    Skeleton scalar_block(plaid_, "skel.block");  // Start with a code-block
+    Skeleton scalar_block(plaid_, "skel.block");// Start with a code-block
 
-    declare_init_opds(scalar_block, "PROLOG");    // Declare operand variables and offset them
+    declare_init_opds(scalar_block, "PROLOG");  // Declare operand variables and offset them
 
-    emit_operations(scalar_block);                // Fills PROLOG, BODY, EPILOG
+    emit_operations(scalar_block, from, to, true);    // Fills PROLOG, BODY, EPILOG
 
     set<uint64_t> written;                      // Write scalars back to memory
     for(kernel_tac_iter tit=tacs_begin();
         tit!=tacs_end();
         ++tit) {
         kp_tac & tac = **tit;
-
         Operand& opd = operand_glb(tac.out);
         if (((tac.op & (KP_MAP | KP_ZIP | KP_GENERATE))>0) and \
             ((opd.meta().layout & KP_SCALAR)>0) and \
@@ -1087,10 +1130,14 @@ string Emitter::generate_source(bool offload)
         loop["BODY"] = scalar_block["BODY"];
         loop["EPILOG"] = scalar_block["EPILOG"];
 
+        // NOTE: Experimental stream-hack
+        if (to != (tacs_.size()-1)) {
+            Skeleton hack_block(plaid_, "skel.block");
+            emit_operations(hack_block, to+1, (size_t)(tacs_.size()-1), false);
+            loop["EPILOG"] += hack_block.emit();
+        }
+
         krn["BODY"] = loop.emit();                  // Overwrite the code-block in kernel BODY
-
-        // TODO: Add some "stream" operations here.
-
 
         vector<int64_t> outer_axes;                 // Determine the outer axes
         for(int64_t axis=ispace_ndim-1; axis>=0; --axis) {

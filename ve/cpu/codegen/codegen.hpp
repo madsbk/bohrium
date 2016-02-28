@@ -444,12 +444,12 @@ public:
     std::string collapsed_walk();
     std::string nested_walk();
 
-    void emit_operations(Skeleton& skel);
+    void emit_operations(Skeleton& skel, size_t from, size_t to, bool axis_walk);
     void declare_init_opds(Skeleton& skel, std::string sect);
 
     std::string generate_source(bool offload);
 
-    std::string axis_access(int64_t glb_idx, int64_t axis);
+    std::string axis_access(int64_t glb_idx, int64_t axis, bool axis_walk);
 
     uint64_t noperands(void);
     Operand& operand_glb(uint64_t gidx);
