@@ -300,37 +300,28 @@ static bool fuse_same_shape_stream_creduce_preduce_once(const bh_instruction *a,
         // then we only need to compare with one of them.
         // We use the output operand since it is always defined.
         if (reduction_ndim != other.operand[0].ndim) {
-            printf("a-or-b-red: Rejecting because of ndim.\n");
             return false;
         }
         for (bh_intp dim=0; dim<reduction_ndim; ++dim) {
             if (reduction_shape[dim] != other.operand[0].shape[dim]) {
-                printf("a-or-b-red: Rejecting because of shape.\n");
                 return false;
             }
         }
+    } else {    // everything else 
 
-    // everything else 
-    }  else {
+        const bh_instruction* largest = a->operand[0].ndim >= b->operand[0].ndim ? a : b;
+        const int largest_ndim = largest->operand[0].ndim;
 
-        const int b_nop = bh_operands(b->opcode);
+        const bh_instruction* smallest = a->operand[0].ndim >= b->operand[0].ndim ? b : a;
+        const int smallest_ndim = largest->operand[0].ndim;
 
-        const bh_intp *shape = a->operand[0].shape;
-        const bh_intp ndim = a->operand[0].ndim;
-
-        if (not is_scalar(&a->operand[0])) {
-            for (int i=0; i<b_nop; ++i) {
-                if (bh_is_constant(&b->operand[i]))
-                    continue;
-                if (ndim != b->operand[i].ndim) {
-                    printf("else: Rejecting because of ndim.");
+        if (not is_scalar(&largest->operand[0])) {
+            if ((largest_ndim - smallest_ndim)>1) {
+                return false;
+            }
+            for (bh_intp idx=0; idx<smallest_ndim; ++idx) {
+                if (smallest->operand[0].shape[idx] != largest->operand[0].shape[idx]) {
                     return false;
-                }
-                for (bh_intp j=0; j<ndim; ++j) {
-                    if (b->operand[i].shape[j] != shape[j]) {
-                        printf("else: Rejecting because of shape.");
-                        return false;
-                    }
                 }
             }
         }
