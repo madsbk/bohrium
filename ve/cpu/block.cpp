@@ -415,7 +415,8 @@ void Block::_update_iterspace(void)
                 case 3:
                     if (globals_[tac.in2].layout > block_.iterspace.layout) {   // Iterspace
                         block_.iterspace.layout = globals_[tac.in2].layout;
-                        if (block_.iterspace.layout > KP_SCALAR_TEMP) {
+                        if ((block_.iterspace.layout > KP_SCALAR_TEMP) &&
+                            (block_.iterspace.ndim < globals_[tac.out].ndim)) {
                             block_.iterspace.ndim  = globals_[tac.in2].ndim;
                             block_.iterspace.shape = globals_[tac.in2].shape;
                         }
@@ -423,7 +424,8 @@ void Block::_update_iterspace(void)
                 case 2:
                     if (globals_[tac.in1].layout > block_.iterspace.layout) {   // Iterspace
                         block_.iterspace.layout = globals_[tac.in1].layout;
-                        if (block_.iterspace.layout > KP_SCALAR_TEMP) {
+                        if ((block_.iterspace.layout > KP_SCALAR_TEMP) &&
+                            (block_.iterspace.ndim < globals_[tac.out].ndim)) {
                             block_.iterspace.ndim  = globals_[tac.in1].ndim;
                             block_.iterspace.shape = globals_[tac.in1].shape;
                         }
@@ -431,7 +433,8 @@ void Block::_update_iterspace(void)
                 case 1:
                     if (globals_[tac.out].layout > block_.iterspace.layout) {   // Iterspace
                         block_.iterspace.layout = globals_[tac.out].layout;
-                        if (block_.iterspace.layout > KP_SCALAR_TEMP) {
+                        if ((block_.iterspace.layout > KP_SCALAR_TEMP) &&
+                            (block_.iterspace.ndim < globals_[tac.out].ndim)) {
                             block_.iterspace.ndim  = globals_[tac.out].ndim;
                             block_.iterspace.shape = globals_[tac.out].shape;
                         }
