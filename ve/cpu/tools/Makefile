@@ -10,11 +10,12 @@ BH_PYTHON=python
 # PASS
 TEST_EXCLUDE=--exclude=test_primitives.py --exclude=test_accumulate.py --exclude=test_specials.py --exclude=test_accumulate.py
 TEST_EXCLUDE+= --exclude=test_reduce.py --exclude=test_bohrium.py --exclude=test_ndstencil.py --exclude=test_emptiness.py --exclude=test_array_create.py
-TEST_EXCLUDE+= --exclude-test=test_black_scholes --exclude-test=test_gameoflife --exclude-test=test_gauss --exclude-test=test_heat_equation --exclude-test=test_gauss_20x20 --exclude-test=test_heat_equation_fixed --exclude-test=test_lu --exclude-test=test_mxmul --exclude-test=test_point27 --exclude-test=test_rosenbrock --exclude-test=test_shallow_water --exclude-test=test_snakes_and_ladders --exclude-test=test_synth --exclude-test=test_wireworld
+TEST_EXCLUDE+= --exclude-test=test_black_scholes --exclude-test=test_gameoflife --exclude-test=test_gauss --exclude-test=test_heat_equation --exclude-test=test_gauss_20x20 --exclude-test=test_heat_equation_fixed --exclude-test=test_lu --exclude-test=test_mxmul --exclude-test=test_point27 --exclude-test=test_rosenbrock --exclude-test=test_shallow_water --exclude-test=test_snakes_and_ladders --exclude-test=test_synth --exclude-test=test_wireworld  --exclude-test=test_nbody --exclude-test=test_jacobi --exclude-test=test_jacobi_fixed  --exclude-test=test_knn_naive   --exclude-test=test_xraysim
 TEST_EXCLUDE+= --exclude=test_views.py --exclude=test_matmul.py --exclude=test_sign.py --exclude=test_types.py
 
 # FAIL
-TEST_EXCLUDE+= --exclude-test=test_sor  --exclude-test=test_idl_init --exclude-test=test_idl_init_1loop --exclude-test=test_jacobi --exclude-test=test_jacobi_fixed --exclude-test=test_knn_naive --exclude-test=test_nbody --exclude-test=test_xraysim
+TEST_EXCLUDE+= --exclude-test=test_idl_init --exclude-test=test_idl_init_1loop
+#TEST_EXCLUDE+=  --exclude-test=test_sor
 
 #TEST=--test=test_heat_equation
 DUMPSRC=1

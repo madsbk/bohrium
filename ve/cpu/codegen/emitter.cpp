@@ -268,9 +268,9 @@ string Emitter::oper(KP_OPERATOR oper, KP_ETYPE etype, string in1, string in2)
                 case KP_COMPLEX64:     return _cpowf(in1, in2);
                 default:            return _pow(in1, in2);
             }
-        case KP_RANDOM:                return _random("idx0", in1, in2);
+        case KP_RANDOM:                return _random("idx", in1, in2);
         //case KP_RANGE:                 return _range();
-        case KP_RANGE:                 return "idx0";
+        case KP_RANGE:                 return "idx";
         case KP_REAL:
             switch(etype) {
                 case KP_FLOAT32:       return _crealf(in1);
@@ -457,7 +457,19 @@ string Emitter::axis_access(int64_t glb_idx, const int64_t axis, bool axis_walk,
             break;
 
         case KP_CONSECUTIVE:
-            ss << _beef("Fix consecutive stride... axis_access.");
+            if ((axis == operand.meta().ndim-1) && (operand.meta().stride[axis] == 0)) {
+                ss << _index(operand.walker(), "0");
+            } else if ((axis == operand.meta().ndim-1) && (operand.meta().stride[axis] == 1)) {
+                ss << _index(operand.walker(), "idx");
+            } else {
+                ss << _index(
+                    operand.walker(),
+                    _mul(
+                        "idx",
+                        operand.strides()+"_d"+to_string(axis)
+                    )
+                );
+            }
             break;
 
         case KP_STRIDED:
@@ -1187,11 +1199,16 @@ string Emitter::nested_walk()
     loop["INCR"] = _inc("idx" + to_string(ispace_axis));
     
     emit_operations(loop, "BODY", from, to, true, false);    // Fills PROLOG, BODY, EPILOG
-    if ((omask() & KP_SCAN)==0) {
+
+    if ((omask() & KP_REDUCE_COMPLETE)>0) {
+        emit_accu_shared_update(loop, "EPILOG");
+    } else if ((omask() & KP_REDUCE_PARTIAL)>0) {
         emit_accu_priv_write(loop, "EPILOG");
     }
     if (to != (tacs_.size()-1)) {   // NOTE: Experimental stream-hack
-        emit_operations(loop, "EPILOG", to+1, (size_t)(tacs_.size()-1), false, false);
+        if ((omask() & KP_REDUCE_COMPLETE)==0) {
+            emit_operations(loop, "EPILOG", to+1, (size_t)(tacs_.size()-1), false, false);
+        }
     }
 
     src = loop.emit();
@@ -1209,11 +1226,17 @@ string Emitter::nested_walk()
 
         if (*idx==outer_axes.back()) {          // Outermost loop
                                                 // Annotate omp parallel
+            emit_accu_shared_declr(nloop, "PROLOG");
             nloop["PRAGMA"] = "#pragma omp parallel for schedule(static)";
             if (ispace_ndim > 2) {              // Annotate "collapse"
                 nloop["PRAGMA"] += " collapse(" + to_string(ispace_ndim-1) + ")";
             }
-            write_scalars(nloop, "EPILOG");     // Write scalars in EPILOG
+            if ((omask() & KP_REDUCE_COMPLETE)>0) {
+                emit_opds_declr_init(nloop, "EPILOG", to, tacs_.size()-1);
+                emit_accu_shared_write(nloop, "EPILOG");
+                emit_operations(nloop, "EPILOG", to+1, tacs_.size()-1, true, true);
+                write_scalars(nloop, "EPILOG");
+            }
         }
 
         nloop["INIT"] = _declare_init(_int64(), "idx"+to_string(*idx),  "0");
