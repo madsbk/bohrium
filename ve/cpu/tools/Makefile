@@ -4,9 +4,8 @@ BDIR=/tmp/bhbuild_cpu/
 #PAR_LVL=-j$(shell expr $(shell nproc) / 2)
 PAR_LVL=-j1
 BH_PYTHON=python
-TEST_EXCLUDE=--exclude-test=test_lbm_3d --exclude-test=test_lu --exclude-test=test_matmul --exclude-test=test_reduce_bool
-TEST_EXCLUDE=--exclude-test=test_lbm_3d
-TEST_EXCLUDE=
+TEST_EXCLUDE=--exclude-test=test_sor 
+#TEST=
 DUMPSRC=1
 
 BUILD_OPTIONS=
@@ -134,8 +133,8 @@ foo:
 	BH_CPU_JIT_NESTED=1 python -m bohrium $(BH_SRC)/ve/cpu/tools/red.py
 
 test:
-	BH_CPU_JIT_LEVEL=3 python $(BH_SRC)/test/python/numpytest.py $(TEST_EXCLUDE)
-	BH_CPU_JIT_LEVEL=1 python $(BH_SRC)/test/python/numpytest.py $(TEST_EXCLUDE)
+	BH_CPU_JIT_LEVEL=3 python $(BH_SRC)/test/python/numpytest.py $(TEST_EXCLUDE) $(TEST)
+	BH_CPU_JIT_LEVEL=1 python $(BH_SRC)/test/python/numpytest.py $(TEST_EXCLUDE) $(TEST)
 
 #
 # Generate Doxygen documentation
