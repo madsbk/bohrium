@@ -441,15 +441,25 @@ public:
     Emitter(Plaid& plaid, kp::core::Block& block);
    
     std::string scalar_walk();
-    std::string collapsed_walk();
+    std::string flattened_walk();
     std::string nested_walk();
 
-    void emit_operations(Skeleton& skel, size_t from, size_t to, bool axis_walk);
-    void declare_init_opds(Skeleton& skel, std::string sect);
+    void write_scalars(Skeleton& skel, std::string sect);
+    void emit_accu_priv_declr(Skeleton& skel, std::string sect);
+    void emit_accu_priv_write(Skeleton& skel, std::string sect);
+    void emit_accu_shared_declr(Skeleton& skel, std::string sect);
+    void emit_accu_shared_write(Skeleton& skel, std::string sect);
+    void emit_accu_shared_update(Skeleton& skel, std::string sect);
+
+    /** currently scalars only **/
+    void emit_opds_declr_init(Skeleton& skel, std::string sect, size_t from, size_t to);
+
+    void emit_operations(Skeleton& skel, std::string sect, size_t from, size_t to, bool axis_walk, bool flattened);
+    void declare_init_opds(Skeleton& skel, std::string sect, bool flattened);
 
     std::string generate_source(bool offload);
 
-    std::string axis_access(int64_t glb_idx, int64_t axis, bool axis_walk);
+    std::string axis_access(int64_t glb_idx, int64_t axis, bool axis_walk, bool flattened);
 
     uint64_t noperands(void);
     Operand& operand_glb(uint64_t gidx);

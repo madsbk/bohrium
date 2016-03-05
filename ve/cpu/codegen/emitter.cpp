@@ -10,11 +10,13 @@ namespace kp{
 namespace engine{
 namespace codegen{
 
-Emitter::Emitter(Plaid& plaid, Block& block) : plaid_(plaid), block_(block), iterspace_(block.iterspace()) {
-
+Emitter::Emitter(Plaid& plaid, Block& block)
+: plaid_(plaid), block_(block), iterspace_(block.iterspace())
+{
+    // Add array operations from block to kernel-tacs.
     for(size_t tac_idx=0; tac_idx<block_.ntacs(); ++tac_idx) {
         kp_tac & tac = block_.tac(tac_idx);
-        if (not ((tac.op & (KP_ARRAY_OPS))>0)) {   // Only interested in array ops
+        if ((tac.op & KP_ARRAY_OPS)==0) {
             continue;
         }
         tacs_.push_back(&tac);
@@ -442,13 +444,30 @@ kernel_tac_iter Emitter::tacs_end(void)
     return tacs_.end();
 }
 
-string Emitter::axis_access(int64_t glb_idx, const int64_t axis, bool axis_walk)
+string Emitter::axis_access(int64_t glb_idx, const int64_t axis, bool axis_walk, bool flattened)
 {
     stringstream ss;
 
     Operand& operand = operand_glb(glb_idx);
 
-    if (axis_walk) {
+    if (flattened) {
+        switch(operand.meta().layout) {
+        case KP_CONTIGUOUS:
+            ss << _index(operand.walker(), "idx");
+            break;
+
+        case KP_CONSECUTIVE:
+            ss << _beef("Fix consecutive stride... axis_access.");
+            break;
+
+        case KP_STRIDED:
+            ss << _beef("This should not happen(axis_access)");
+            break;
+        default:
+            ss << operand_glb(glb_idx).walker();
+            break;
+        }
+    } else if (axis_walk) {
         switch(operand.meta().layout) {
         case KP_CONTIGUOUS:
         case KP_STRIDED:
@@ -625,22 +644,57 @@ string Emitter::unpack_arguments(void)
     return ss.str();
 }
 
-string Emitter::scalar_walk()
+void Emitter::emit_opds_declr_init(Skeleton& skel, string sect, size_t from, size_t to)
 {
-    return "";
-}
+    set<uint64_t> declared_scalars;
+    for(size_t tac_idx=from; tac_idx<=to; ++tac_idx) {
+        kp_tac* tac = tacs_[tac_idx];
+        for(size_t oidx=0; oidx<kp_tac_noperands(tac); ++oidx) {
+            Operand* operand;
+            switch(oidx) {
+            case 0:
+                operand = &operand_glb(tac->out);
+                break;
+            case 1:
+                operand = &operand_glb(tac->in1);
+                break;
+            case 2:
+                operand = &operand_glb(tac->in2);
+                break;
+            }
+            if (declared_scalars.find(operand->local_id())==declared_scalars.end()) {
+                declared_scalars.insert(operand->local_id());
+                switch(operand->meta().layout) {
+                case KP_SCALAR_CONST:
+                    break;
 
-string Emitter::collapsed_walk()
-{
-    return "";
-}
+                case KP_SCALAR:
+                    skel[sect] += _declare_init(
+                        operand->etype(),
+                        operand->walker(),
+                        _deref(_add(operand->buffer_data(), operand->start()))
+                    );
+                    break;
 
-string Emitter::nested_walk()
-{
-    return "";
-}
+                case KP_SCALAR_TEMP:
+                case KP_CONTRACTABLE:
+                    skel[sect] += _declare(
+                        operand->etype(),
+                        operand->walker()
+                    );
+                    break;
 
-void Emitter::declare_init_opds(Skeleton& skel, string sect)
+                default:
+                    //skel[sect] += _beef("This should not happen.");
+                    break;
+                }
+                skel[sect] += _end(" making scalar prolog fit...");
+            }
+        }
+    }
+} 
+
+void Emitter::declare_init_opds(Skeleton& skel, string sect, bool flattened)
 {
     const uint32_t ispace_ndim = iterspace().meta().ndim;
     int64_t ispace_axis = iterspace().meta().axis;
@@ -676,20 +730,23 @@ void Emitter::declare_init_opds(Skeleton& skel, string sect)
             case KP_STRIDED:
                 {
                     stringstream offset;    // DO: offset += idx*stride for every non-axis dim
-                    int64_t opd_ndim = operand.meta().ndim;
-                    int64_t opd_axis = 0;
-                    for (int64_t axis=0; axis<ispace_ndim; ++axis) {
-                        if (axis==ispace_axis) {
-                            if (opd_ndim==ispace_ndim) {
-                                ++opd_axis;
+                    offset << "";
+                    if (!flattened) {
+                        int64_t opd_ndim = operand.meta().ndim;
+                        int64_t opd_axis = 0;
+                        for (int64_t axis=0; axis<ispace_ndim; ++axis) {
+                            if (axis==ispace_axis) {
+                                if (opd_ndim==ispace_ndim) {
+                                    ++opd_axis;
+                                }
+                                continue;
                             }
-                            continue;
+                            offset << " + " << _mul(
+                                operand.strides()+"_d"+to_string(opd_axis),
+                                "idx"+to_string(axis)
+                            );
+                            ++opd_axis;
                         }
-                        offset << " + " << _mul(
-                            operand.strides()+"_d"+to_string(opd_axis),
-                            "idx"+to_string(axis)
-                        );
-                        ++opd_axis;
                     }
                                             // Declare array pointers
                     if (restrictable) {     // Annotate *restrict*
@@ -716,10 +773,137 @@ void Emitter::declare_init_opds(Skeleton& skel, string sect)
     }
 }
 
-void Emitter::emit_operations(Skeleton& skel, size_t from, size_t to, bool axis_walk)
+void Emitter::write_scalars(Skeleton& skel, string sect)
+{
+    skel[sect] += _line(_comment("Write scalars - BEGIN"));
+    set<uint64_t> written;                      // Write scalars back to memory
+    for(kernel_tac_iter tit=tacs_begin();
+        tit!=tacs_end();
+        ++tit) {
+        kp_tac & tac = **tit;
+        Operand& opd = operand_glb(tac.out);
+        //if (((tac.op & (KP_MAP | KP_ZIP | KP_GENERATE))>0) and 
+        if (((opd.meta().layout & KP_SCALAR)>0) and \
+            (written.find(tac.out)==written.end())) {
+            skel[sect] += _line(_assign(
+                _deref(_add(opd.buffer_data(), opd.start())),
+                opd.walker_val()
+            ));
+            written.insert(tac.out);
+        }
+    }
+    skel[sect] += _line(_comment("Write scalars - END"));
+}
+
+void Emitter::emit_accu_priv_declr(Skeleton& skel, string sect)
+{
+    for(size_t tac_idx=0; tac_idx<tacs_.size(); ++tac_idx) {
+        kp_tac& tac = *tacs_[tac_idx];
+        if ((tac.op & KP_ACCUMULATION)>0) {
+            skel[sect] += _declare_init(
+                operand_glb(tac.in1).etype(),
+                operand_glb(tac.in1).accu_private(),
+                oper_neutral_element(tac.oper, operand_glb(tac.in1).meta().etype)
+            );
+            skel[sect] += _end(" Private accumulator");
+        }
+    }
+}
+
+//
+void Emitter::emit_accu_priv_write(Skeleton& skel, string sect)
+{
+    for(size_t tac_idx=0; tac_idx<tacs_.size(); ++tac_idx) {
+        kp_tac& tac = *tacs_[tac_idx];
+        if ((tac.op & KP_ACCUMULATION)>0) {
+            switch(operand_glb(tac.out).meta().layout) {
+            case KP_CONTRACTABLE:
+                skel[sect] += _assign(
+                    operand_glb(tac.out).walker(),
+                    operand_glb(tac.in1).accu_private()
+                );
+                skel[sect] += _end(" Write private accumulator to operand");
+                break;
+            default:
+                skel[sect] += _assign(
+                    _deref(operand_glb(tac.out).walker()),
+                    operand_glb(tac.in1).accu_private()
+                );
+                skel[sect] += _end(" Write private accumulator to operand");
+                break;
+            }
+        }
+    }
+}
+
+void Emitter::emit_accu_shared_declr(Skeleton& skel, string sect)
+{
+    for(size_t tac_idx=0; tac_idx<tacs_.size(); ++tac_idx) {
+        kp_tac& tac = *tacs_[tac_idx];
+        if ((tac.op & KP_ACCUMULATION)>0) {
+            skel[sect] += _declare_init(
+                operand_glb(tac.in1).etype(),
+                operand_glb(tac.in1).accu_shared(),
+                oper_neutral_element(
+                    tac.oper,
+                    operand_glb(tac.in1).meta().etype
+                )
+            );
+            skel[sect] += _end(" Shared accumulator decl/init");
+        }
+    }
+}
+
+// Write shared accumulator to backing memory
+void Emitter::emit_accu_shared_write(Skeleton& skel, string sect)
+{
+    for(size_t tac_idx=0; tac_idx<tacs_.size(); ++tac_idx) {
+        kp_tac& tac = *tacs_[tac_idx];
+        if ((tac.op & KP_ACCUMULATION)>0) {
+            switch(operand_glb(tac.out).meta().layout) {
+            case KP_SCALAR:
+            case KP_SCALAR_TEMP:
+            case KP_CONTRACTABLE:
+                skel[sect] += _assign(
+                    operand_glb(tac.out).walker(),
+                    operand_glb(tac.in1).accu_shared()
+                );
+                skel[sect] += _end(" Write shared accumulator to operand.");
+                break;
+            default:
+                skel[sect] += _assign(
+                    _deref(operand_glb(tac.out).walker()),
+                    operand_glb(tac.in1).accu_shared()
+                );
+                skel[sect] += _end(" Write shared accumulator operand");
+                break;
+            }
+        }
+    }
+}
+
+// Update shared accumulator with value of private accumulator
+void Emitter::emit_accu_shared_update(Skeleton& skel, string sect) {
+    for(size_t tac_idx=0; tac_idx<tacs_.size(); ++tac_idx) {
+        kp_tac& tac = *tacs_[tac_idx];
+        if ((tac.op & KP_ACCUMULATION)>0) {
+            skel[sect] += synced_oper(
+                tac.oper,
+                operand_glb(tac.in1).meta().etype,
+                operand_glb(tac.in1).accu_shared(),
+                operand_glb(tac.in1).accu_shared(),
+                operand_glb(tac.in1).accu_private()
+            );
+            skel[sect] += _end(" Shared accumulator - update");
+        }
+    }
+}
+
+void Emitter::emit_operations(Skeleton& skel, string sect, size_t from, size_t to, bool axis_walk, bool flattened)
 {
     int64_t ispace_axis = iterspace().meta().axis;
 
+    skel[sect] += _line(_comment(" Emitting operations - BEGIN"));
     for(size_t tac_idx = from; tac_idx <= to; ++tac_idx) {
         kp_tac& tac = *tacs_[tac_idx];
 
@@ -728,165 +912,92 @@ void Emitter::emit_operations(Skeleton& skel, size_t from, size_t to, bool axis_
         string out = "ERROR_OUT", in1 = "ERROR_IN1", in2 = "ERROR_IN2";
         switch(tac.op) {
         case KP_ZIP:
-            if (axis_walk) {
-                skel["BODY"] += _assign(
-                    axis_access(tac.out, ispace_axis, axis_walk),
-                    oper(
-                        tac.oper,
-                        etype,
-                        axis_access(tac.in1, ispace_axis, axis_walk),
-                        axis_access(tac.in2, ispace_axis, axis_walk)
-                    )
-                );
-            } else {
-                skel["BODY"] += _assign(
-                    axis_access(tac.out, ispace_axis, axis_walk),
-                    oper(
-                        tac.oper,
-                        etype,
-                        axis_access(tac.in1, ispace_axis, axis_walk),
-                        axis_access(tac.in2, ispace_axis, axis_walk)
-                    )
-                );
-            }
-            skel["BODY"] += _end(oper_description(tac));
-            break;
-
-        case KP_MAP:
-            skel["BODY"] += _assign(
-                axis_access(tac.out, ispace_axis, axis_walk),
+            skel[sect] += _assign(
+                axis_access(tac.out, ispace_axis, axis_walk, flattened),
                 oper(
                     tac.oper,
                     etype,
-                    axis_access(tac.in1, ispace_axis, axis_walk),
+                    axis_access(tac.in1, ispace_axis, axis_walk, flattened),
+                    axis_access(tac.in2, ispace_axis, axis_walk, flattened)
+                )
+            );
+            skel[sect] += _end(oper_description(tac));
+            break;
+
+        case KP_MAP:
+            skel[sect] += _assign(
+                axis_access(tac.out, ispace_axis, axis_walk, flattened),
+                oper(
+                    tac.oper,
+                    etype,
+                    axis_access(tac.in1, ispace_axis, axis_walk, flattened),
                     ""
                 )
             );
-            skel["BODY"] += _end(oper_description(tac));
+            skel[sect] += _end(oper_description(tac));
             break;
 
         case KP_GENERATE:
             switch(tac.oper) {
             case KP_RANDOM: // Random has inputs
-                skel["BODY"] += _assign(
-                    axis_access(tac.out, ispace_axis, axis_walk),
+                skel[sect] += _assign(
+                    axis_access(tac.out, ispace_axis, axis_walk, flattened),
                     oper(
                         tac.oper,
                         etype,
-                        axis_access(tac.in1, ispace_axis, axis_walk),
-                        axis_access(tac.in2, ispace_axis, axis_walk)
+                        axis_access(tac.in1, ispace_axis, axis_walk, flattened),
+                        axis_access(tac.in2, ispace_axis, axis_walk, flattened)
                     )
                 );
                 break;
             default:
-                skel["BODY"] += _assign(
-                    axis_access(tac.out, ispace_axis, axis_walk),
+                skel[sect] += _assign(
+                    axis_access(tac.out, ispace_axis, axis_walk, flattened),
                     oper(tac.oper, etype, "", "")
                 );
                 break;
             }
-            skel["BODY"] += _end(oper_description(tac));
+            skel[sect] += _end(oper_description(tac));
             break;
 
         case KP_REDUCE_COMPLETE:
-            //
-            // Private accumulator
-
-            // Declare and initialize to neutral
-            skel["PROLOG"] += _line(_declare_init(
-                operand_glb(tac.in1).etype(),
-                operand_glb(tac.in1).accu_private(),
-                oper_neutral_element(tac.oper, operand_glb(tac.in1).meta().etype)
-            ));
-            // Update shared accumulator with value of private accumulator
-            skel["EPILOG"] += _line(synced_oper(
-                tac.oper,
-                operand_glb(tac.in1).meta().etype,
-                operand_glb(tac.in1).accu_shared(),
-                operand_glb(tac.in1).accu_shared(),
-                operand_glb(tac.in1).accu_private()
-            )) + _end(" Syncing shared <-> private accumultor var");
-            
-            // The reduction operation itself
-
-            skel["BODY"] += _assign(
-                operand_glb(tac.in1).accu_private(),
-                oper(
-                    tac.oper,
-                    operand_glb(tac.in1).meta().etype,
-                    operand_glb(tac.in1).accu_private(),
-                    axis_access(tac.in1, ispace_axis, axis_walk)
-                )
-            );
-            skel["BODY"] += _end(oper_description(tac));
-            break;
-
         case KP_REDUCE_PARTIAL:
-            // Declare and initialize private accumulator to neutral
-            skel["PROLOG"] += _line(_declare_init(
-                operand_glb(tac.in1).etype(),
-                operand_glb(tac.in1).accu_private(),
-                oper_neutral_element(tac.oper, operand_glb(tac.in1).meta().etype)
-            ));
-            // The reduction operation itself
-            skel["BODY"] += _assign(
+            skel[sect] += _assign(
                 operand_glb(tac.in1).accu_private(),
                 oper(
                     tac.oper,
                     operand_glb(tac.in1).meta().etype,
                     operand_glb(tac.in1).accu_private(),
-                    axis_access(tac.in1, ispace_axis, axis_walk)
+                    axis_access(tac.in1, ispace_axis, axis_walk, flattened)
                 )
             );
-            skel["BODY"] += _end(oper_description(tac));
-
-            // TODO: Needs change when streaming since "out" could be intermediate
-            switch(operand_glb(tac.out).meta().layout) {
-            case KP_CONTRACTABLE:
-                skel["EPILOG"] += _assign(
-                    operand_glb(tac.out).walker(),
-                    operand_glb(tac.in1).accu_private()
-                )+_end(" Write accumulated variable to array.");
-                break;
-            default:
-                skel["EPILOG"] += _assign(
-                    _deref(operand_glb(tac.out).walker()),
-                    operand_glb(tac.in1).accu_private()
-                )+_end(" Write accumulated variable to array.");
-                break;
-            }
+            skel[sect] += _end(oper_description(tac));
             break;
 
         case KP_SCAN:
-            // Declare and initialize private accumulator to neutral
-            skel["PROLOG"] += _line(_declare_init(
-                operand_glb(tac.in1).etype(),
-                operand_glb(tac.in1).accu_private(),
-                oper_neutral_element(tac.oper, operand_glb(tac.in1).meta().etype)
-            ));
-            // The accumulation operation itself
-            skel["BODY"] += _assign(
+            skel[sect] += _assign(
                 operand_glb(tac.in1).accu_private(),
                 oper(
                     tac.oper,
                     operand_glb(tac.in1).meta().etype,
                     operand_glb(tac.in1).accu_private(),
-                    axis_access(tac.in1, ispace_axis, axis_walk)
+                    axis_access(tac.in1, ispace_axis, axis_walk, flattened)
                 )
             );
-            skel["BODY"] += _end("Accumulatation");
-            skel["BODY"] += _assign(
-                axis_access(tac.out, ispace_axis, axis_walk),
+            skel[sect] += _end("Accumulatation");
+            skel[sect] += _assign(
+                axis_access(tac.out, ispace_axis, axis_walk, flattened),
                 operand_glb(tac.in1).accu_private()
             );
-            skel["BODY"] += _end(oper_description(tac));
+            skel[sect] += _end(oper_description(tac));
             break;
 
         default:
-            skel["BODY"] += "UNSUPPORTED_OPERATION["+ operation_text(tac.op) +"]_AT_EMITTER_STAGE";
+            skel[sect] += "UNSUPPORTED_OPERATION["+ operation_text(tac.op) +"]_AT_EMITTER_STAGE";
             break;
         }
     }
+    skel[sect] += _line(_comment(" Emitting operations - END"));
 }
 
 string Emitter::simd_reduction_annotation(void)
@@ -942,9 +1053,187 @@ string Emitter::simd_reduction_annotation(void)
     }
 }
 
+string Emitter::scalar_walk()
+{
+    Skeleton scalar_block(plaid_, "skel.block");            // Skeleton
+    declare_init_opds(scalar_block, "PROLOG", true);        // Declare operands
+    emit_operations(scalar_block, "BODY", 0, tacs_.size()-1, true, true); // Emit operations
+    write_scalars(scalar_block, "EPILOG");                  // Write scalars
+
+    return scalar_block.emit();
+}
+
+/*
+Constructs a loop structure driven by iterspace.nelements,
+it is "flattened" since it applies to and iterspace of arbitratry rank
+as long as it:
+
+    * Has layout < KP_STRIDED, since a constant increment is needed.
+    * Does not contain PARTIAL reductions or SCANs
+
+Emits code on the form:
+#pragma omp parallel - this is the "pblock"
+{
+    #pragma omp for schedule(static) - this is the ploop
+    {
+        // Chunked bound
+        #pragma omp simd [reduction(...)] - this is the vloop
+        {
+        }
+    }
+}
+*/
+string Emitter::flattened_walk()
+{
+    size_t from = 0;
+    size_t to = tacs_.size()-1;
+    for(size_t tac_idx=0; tac_idx<tacs_.size(); ++tac_idx) {
+        if ((tacs_[tac_idx]->op & (KP_REDUCE_COMPLETE|KP_REDUCE_PARTIAL))>0) {
+            to = tac_idx;
+        }
+    }
+
+    Skeleton vloop(plaid_, "skel.loop");        // Vectorized loop / ILP
+
+    declare_init_opds(vloop, "PROLOG", true);   // Declare operands
+    emit_accu_priv_declr(vloop, "PROLOG");      // Declare private accumulators
+    vloop["PROLOG"] += _declare_init(           // Declare tiling/loop chunking
+        _const(_int64()),
+        "idx_chunked_bound",
+        _min("iterspace_nelem", _add("idx_chunked", "KP_CHUNKSIZE"))
+    );
+    vloop["PROLOG"] += _end(" Loop tiling / chunking");
+
+    #ifdef CAPE_WITH_OMP_SIMD
+    vloop["PRAGMA"] += "#pragma omp simd";
+    vloop["PRAGMA"] += " "+simd_reduction_annotation();
+    #endif
+
+    vloop["INIT"] = _declare_init(_int64(), "idx", "idx_chunked");
+    vloop["COND"] =_lt("idx", "idx_chunked_bound");
+    vloop["INCR"] = _inc("idx");
+
+    emit_operations(vloop, "BODY", from, to, true, true);
+    emit_accu_shared_update(vloop, "EPILOG");   // Shared accumulator - update
+    
+    Skeleton ploop(plaid_, "skel.loop");    // Distributed loop / TLP
+
+    emit_accu_shared_declr(ploop, "PROLOG");
+
+    ploop["INIT"] = _declare_init(_int64(), "idx_chunked",  "0");
+    ploop["COND"] =_lt("idx_chunked", "iterspace_nelem");
+    ploop["INCR"] = "idx_chunked += KP_CHUNKSIZE";
+
+    ploop["PRAGMA"] += "#pragma omp parallel for schedule(static)";
+
+    ploop["BODY"] = vloop.emit();
+
+    if ((omask() & KP_ACCUMULATION)>0) {
+        emit_opds_declr_init(ploop, "EPILOG", to, tacs_.size()-1);
+        emit_accu_shared_write(ploop, "EPILOG");
+        emit_operations(ploop, "EPILOG", to+1, tacs_.size()-1, true, true);
+        write_scalars(ploop, "EPILOG");
+    }
+
+    return ploop.emit();
+}
+
+/*
+    Generates A collapsed nested loop structure driven by iterspace.shape::
+
+    #pragma omp parallel for schedule(static) collapse(n-1)
+    for(...) {
+        for(...) {
+            ...
+            #pragma omp simd [reduction(op:operand)
+            for(...)
+            {
+            }
+        }
+    }
+
+    // NOTE: The innermost loop is intensionally not thread-parallel
+*/    
+string Emitter::nested_walk()
+{
+    string src;
+
+    const int64_t ispace_axis = iterspace().meta().axis;
+    const int64_t ispace_ndim = iterspace().meta().ndim;
+    size_t from = 0;
+    size_t to = tacs_.size()-1;
+    for(size_t tac_idx=0; tac_idx<tacs_.size(); ++tac_idx) {
+        if ((tacs_[tac_idx]->op & (KP_REDUCE_COMPLETE|KP_REDUCE_PARTIAL))>0) {
+            to = tac_idx;
+        }
+    }
+
+    // Innermost loop
+    Skeleton loop(plaid_, "skel.loop");         // Construct axis loop
+
+    declare_init_opds(loop, "PROLOG", false);   // Operands - declare
+    emit_accu_priv_declr(loop, "PROLOG");       // Private accumulators - declare
+
+    #ifdef CAPE_WITH_OMP_SIMD
+    loop["PRAGMA"] += "#pragma omp simd";
+    loop["PRAGMA"] += " "+simd_reduction_annotation();
+    #endif
+
+    loop["INIT"] = _declare_init(_int64(), "idx"+to_string(ispace_axis),  "0");
+    loop["COND"] =_lt(
+        "idx"+to_string(ispace_axis),
+        "iterspace_shape_d"+ to_string(ispace_axis)
+    );
+    loop["INCR"] = _inc("idx" + to_string(ispace_axis));
+    
+    emit_operations(loop, "BODY", from, to, true, false);    // Fills PROLOG, BODY, EPILOG
+    if ((omask() & KP_SCAN)==0) {
+        emit_accu_priv_write(loop, "EPILOG");
+    }
+    if (to != (tacs_.size()-1)) {   // NOTE: Experimental stream-hack
+        emit_operations(loop, "EPILOG", to+1, (size_t)(tacs_.size()-1), false, false);
+    }
+
+    src = loop.emit();
+
+    vector<int64_t> outer_axes;                 // Determine the outer axes
+    for(int64_t axis=ispace_ndim-1; axis>=0; --axis) {
+        if (axis==ispace_axis) {
+            continue;
+        }
+        outer_axes.push_back(axis);
+    }
+                                                // Generate the nested loop construct
+    for(vector<int64_t>::iterator idx=outer_axes.begin(); idx!=outer_axes.end(); ++idx) {
+        Skeleton nloop(plaid_, "skel.loop");
+
+        if (*idx==outer_axes.back()) {          // Outermost loop
+                                                // Annotate omp parallel
+            nloop["PRAGMA"] = "#pragma omp parallel for schedule(static)";
+            if (ispace_ndim > 2) {              // Annotate "collapse"
+                nloop["PRAGMA"] += " collapse(" + to_string(ispace_ndim-1) + ")";
+            }
+            write_scalars(nloop, "EPILOG");     // Write scalars in EPILOG
+        }
+
+        nloop["INIT"] = _declare_init(_int64(), "idx"+to_string(*idx),  "0");
+        nloop["COND"] =_lt(
+            "idx"+to_string(*idx),
+            "iterspace_shape_d"+ to_string(*idx)
+        );
+        nloop["INCR"] = _inc("idx" + to_string(*idx));
+
+        nloop["BODY"] = src;
+
+        src = nloop.emit();
+    }
+
+    return src;
+}
+
 string Emitter::generate_source(bool offload)
 {
-    if ((omask() & KP_ARRAY_OPS)==0) { // There must be at lest one array operation
+    if ((omask() & KP_ARRAY_OPS)==0) { // There must be atleast one array operation
         cerr << text() << endl;
         throw runtime_error("No array operations!");
     }
@@ -953,9 +1242,8 @@ string Emitter::generate_source(bool offload)
         throw runtime_error("KP_EXTENSION in kernel");
     }
 
-    const int64_t ispace_axis = iterspace().meta().axis;
-    const int64_t ispace_ndim = iterspace().meta().ndim;
     const KP_LAYOUT ispace_layout = iterspace().meta().layout;
+    const int64_t ispace_nelem = iterspace().meta().nelem;
 
     Skeleton krn(plaid_, "skel.kernel");
 
@@ -975,199 +1263,29 @@ string Emitter::generate_source(bool offload)
     krn["HEAD"]    += unpack_iterspace();
     krn["HEAD"]    += unpack_buffers();
     krn["HEAD"]    += unpack_arguments();
-
-    /*
-    for(kernel_tac_iter tit=tacs_begin(); tit!=tacs_end(); ++tit) {
-        kp_tac& tac = **tit;
-    */
-    size_t from = 0;
-    size_t to = tacs_.size()-1;
-
-    for(size_t tac_idx=0; tac_idx<tacs_.size(); ++tac_idx) {
-        kp_tac& tac = *tacs_[tac_idx];
-        if ((tac.op & (KP_REDUCE_COMPLETE|KP_REDUCE_PARTIAL))>0) {
-            to = tac_idx;
-        }
-        if (KP_REDUCE_COMPLETE==tac.op) {
-            // Declare and initialize to neutral
-            krn["HEAD"] += _line(_declare_init(
-                operand_glb(tac.in1).etype(),
-                operand_glb(tac.in1).accu_shared(),
-                oper_neutral_element(tac.oper, operand_glb(tac.in1).meta().etype)
-            ));
-        }
-    }
-
-    //
-    // Construct the kernel FOOT, code AFTER any loop constructs / kernel-body.
-    //
-    for(kernel_tac_iter tit=tacs_begin(); tit!=tacs_end(); ++tit) {
-        kp_tac& tac = **tit;
-
-        if (KP_REDUCE_COMPLETE==tac.op) {
-            // Write accumulator to memory
-            krn["FOOT"] += _line(_assign(
-                _deref(_add(
-                    operand_glb(tac.out).buffer_data(),
-                    operand_glb(tac.out).start()
-                )),
-                operand_glb(tac.in1).accu_shared()
-            ));
-        }
-    }
-            
+    
     //
     //  Construct the kernel body
     //
-    krn["BODY"] = "";
+    
+    if (((ispace_layout & (KP_SCALAR_LAYOUT))>0) ||
+        (ispace_nelem==1)) {
 
-    //
-    // Start with a code-block, handling scalars
-    Skeleton scalar_block(plaid_, "skel.block");// Start with a code-block
+        krn["EMITTER"] = "SCALAR_WALK";
+        krn["BODY"] = scalar_walk();
 
-    declare_init_opds(scalar_block, "PROLOG");  // Declare operand variables and offset them
+    } else if (((ispace_layout & KP_COLLAPSIBLE)>0) &&
+                ((omask() & (KP_SCAN|KP_REDUCE_PARTIAL))==0)) {
+        // TODO: Handle complete reductions with additional operations
+        krn["EMITTER"] = "FLATTENED_WALK";
+        krn["BODY"] = flattened_walk();
 
-    emit_operations(scalar_block, from, to, true);    // Fills PROLOG, BODY, EPILOG
+    } else {
 
-    set<uint64_t> written;                      // Write scalars back to memory
-    for(kernel_tac_iter tit=tacs_begin();
-        tit!=tacs_end();
-        ++tit) {
-        kp_tac & tac = **tit;
-        Operand& opd = operand_glb(tac.out);
-        if (((tac.op & (KP_MAP | KP_ZIP | KP_GENERATE))>0) and \
-            ((opd.meta().layout & KP_SCALAR)>0) and \
-            (written.find(tac.out)==written.end())) {
-            scalar_block["EPILOG"] += _line(_assign(
-                _deref(_add(opd.buffer_data(), opd.start())),
-                opd.walker_val()
-            ));
-            written.insert(tac.out);
-        }
-    }
-                                                            // Scalar kernel
-    if (((ispace_layout & (KP_SCALAR|KP_SCALAR_CONST|KP_CONTRACTABLE))>0) &&
-        ((omask() & KP_ACCUMULATION)==0)) {                 // Accumulations aren't allowed here
-                                                            // They should be filtered out.
-        krn["BODY"] = scalar_block.emit();
+        // TODO: Handle complete reductions with additional operations
+        krn["EMITTER"] = "NESTED_WALK";
+        krn["BODY"] = nested_walk();
 
-    } else if (((omask() & KP_SCAN)==0) && (ispace_ndim==1)) { // Promote scalar_block to loop
-
-        /*
-        Emits code on the form:
-        #pragma omp parallel - this is the "pblock"
-        {
-            #pragma omp for schedule(static) - this is the ploop
-            {
-                // Chunked bound
-                #pragma omp simd [reduction(...)] - this is the vloop
-                {
-                }
-            }
-        }
-        */
-
-        Skeleton vloop(plaid_, "skel.loop");    // Vectorized loop
-        vloop["PROLOG"] = _line(_declare_init(
-            _const(_int64()),
-            "idx"+to_string(ispace_axis)+"_chunked_bound",
-            _min(
-                "iterspace_shape_d"+to_string(ispace_axis),
-                _add("idx"+to_string(ispace_axis)+"_chunked", "KP_CHUNKSIZE")
-            )
-        ));
-        #ifdef CAPE_WITH_OMP_SIMD
-        vloop["PRAGMA"] += "#pragma omp simd";
-        vloop["PRAGMA"] += " "+simd_reduction_annotation();
-        #endif
-
-        vloop["INIT"] = _declare_init(_int64(), "idx"+to_string(ispace_axis),  "idx"+to_string(ispace_axis)+"_chunked");
-        vloop["COND"] =_lt(
-            "idx"+ to_string(ispace_axis),
-            "idx"+ to_string(ispace_axis)+"_chunked_bound"
-        );
-        vloop["INCR"] = _inc("idx" + to_string(ispace_axis));
-        vloop["BODY"] = scalar_block["BODY"];
-
-        Skeleton ploop(plaid_, "skel.loop");    // Parallel loop
-        ploop["INIT"] = _declare_init(_int64(), "idx"+to_string(ispace_axis)+"_chunked",  "0");
-        ploop["COND"] =_lt(
-            "idx"+to_string(ispace_axis)+"_chunked",
-            "iterspace_shape_d"+ to_string(ispace_axis)
-        );
-        ploop["INCR"] = "idx" + to_string(ispace_axis)+ "_chunked += KP_CHUNKSIZE";
-
-        ploop["PRAGMA"] += "#pragma omp for schedule(static)";
-        ploop["PROLOG"] = scalar_block["PROLOG"];
-        ploop["EPILOG"] = scalar_block["EPILOG"];
-        ploop["BODY"] = vloop.emit();
-
-        Skeleton pblock(plaid_, "skel.block");
-        pblock.reset();                         // Parallel block
-        pblock["PRAGMA"] = "#pragma omp parallel";
-        pblock["BODY"] = ploop.emit();
-
-        krn["BODY"] = pblock.emit();
-
-    } else {                                        // Promote scalar_block to nested loop
-
-        // NOTE: The innermost loop is intensionally not thread-parallel
-
-        Skeleton loop(plaid_, "skel.loop");         // Construct axis loop
-        loop["INIT"] = _declare_init(_int64(), "idx"+to_string(ispace_axis),  "0");
-        loop["COND"] =_lt(
-            "idx"+to_string(ispace_axis),
-            "iterspace_shape_d"+ to_string(ispace_axis)
-        );
-        loop["INCR"] = _inc("idx" + to_string(ispace_axis));
-
-        #ifdef CAPE_WITH_OMP_SIMD
-        loop["PRAGMA"] += "#pragma omp simd";
-        loop["PRAGMA"] += " "+simd_reduction_annotation();
-        #endif
-
-        loop["PROLOG"] = scalar_block["PROLOG"];
-        loop["BODY"] = scalar_block["BODY"];
-        loop["EPILOG"] = scalar_block["EPILOG"];
-
-        // NOTE: Experimental stream-hack
-        if (to != (tacs_.size()-1)) {
-            Skeleton hack_block(plaid_, "skel.block");
-            emit_operations(hack_block, to+1, (size_t)(tacs_.size()-1), false);
-            loop["EPILOG"] += hack_block.emit();
-        }
-
-        krn["BODY"] = loop.emit();                  // Overwrite the code-block in kernel BODY
-
-        vector<int64_t> outer_axes;                 // Determine the outer axes
-        for(int64_t axis=ispace_ndim-1; axis>=0; --axis) {
-            if (axis==ispace_axis) {
-                continue;
-            }
-            outer_axes.push_back(axis);
-        }
-                                                    // Generate the nested loop construct
-        for(vector<int64_t>::iterator idx=outer_axes.begin(); idx!=outer_axes.end(); ++idx) {
-            Skeleton nloop(plaid_, "skel.loop");
-   
-            if (*idx==outer_axes.back()) {          // Add "omp parallel" to outermost loop
-                nloop["PRAGMA"] = "#pragma omp parallel for schedule(static)";
-                if (ispace_ndim > 2) {              // Annotate "collapse"
-                    nloop["PRAGMA"] += " collapse(" + to_string(ispace_ndim-1) + ")";
-                }
-            }
- 
-            nloop["INIT"] = _declare_init(_int64(), "idx"+to_string(*idx),  "0");
-            nloop["COND"] =_lt(
-                "idx"+to_string(*idx),
-                "iterspace_shape_d"+ to_string(*idx)
-            );
-            nloop["INCR"] = _inc("idx" + to_string(*idx));
-
-            nloop["BODY"] = krn["BODY"];
-
-            krn["BODY"] = nloop.emit();
-        }
     }
 
     return krn.emit();
