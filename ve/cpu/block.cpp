@@ -200,6 +200,7 @@ bool Block::symbolize(void)
     ispace << "-L" << block_.iterspace.layout;
     ispace << "-A" << block_.iterspace.axis;
     ispace << "-D" << block_.iterspace.ndim;
+    ispace << "-E" << ((block_.iterspace.nelem == 1) ? "1" : "N");
 
     //
     // Scope
