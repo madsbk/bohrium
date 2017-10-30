@@ -365,17 +365,54 @@ void handle_cpu_execution(SelfType &self, BhIR *bhir, EngineType &engine, const 
 
 // Returns True when we should run the `block` on the device
 template<typename EngineType>
-bool compute_on_device(const Block &block, const EngineType &engine) {
-    uint64_t bytes_on_host=0, bytes_on_device=0;
-    for(const bh_base *base: block.getAllBases()) {
-        if (engine.baseOnDevice(base)) {
-            bytes_on_device += bh_base_size(base);
-        } else {
-            bytes_on_host += bh_base_size(base);
+bool compute_on_device(const Block &block, const EngineType &engine, const SymbolTable &symbols, const BhIR *bhir) {
+    const std::set<bh_base *> syncs = bhir->getSyncs();
+    uint64_t params_on_host=0, params_on_device=0;
+    for(const bh_base *base: symbols.getParams()) {
+        if (not util::exist_nconst(syncs, base)) {
+            if (engine.baseOnDevice(base)) {
+                params_on_device += bh_base_size(base);
+            } else if (base->data != nullptr) {
+                params_on_host += bh_base_size(base);
+            }
         }
     }
-    uint64_t bytes_computing = block.compute_size();
-    return bytes_computing > 0;
+    uint64_t syncs_on_host=0, syncs_on_device=0;
+    for(const bh_base *base: bhir->getSyncs()) {
+        if (engine.baseOnDevice(base)) {
+            syncs_on_device += bh_base_size(base);
+        } else {
+            syncs_on_host += bh_base_size(base);
+        }
+    }
+    uint64_t computing = block.compute_size();
+/*
+ *
+GPU:
+computing
+params_on_host
+2*syncs_on_host
+syncs_on_device
+
+
+CPU:
+computing
+params_on_device
+syncs_on_device
+
+
+import numpy as np
+import bohrium as bh
+a = np.random.random(100000)
+b = bh.array(a, bohrium=True)
+c = b.copy2numpy()
+
+bh.sum(bh.ones(1000000))
+ *
+ *
+ */
+
+    return true;
 }
 
 /* Handle execution of regular instructions
@@ -449,7 +486,8 @@ void handle_gpu_execution(SelfType &self, BhIR *bhir, EngineType &engine, const 
         const vector<const LoopB*> threaded_blocks = find_threaded_blocks(block, stat, parallel_threshold);
 
         // We might have to offload the execution to the CPU
-        if (kernel_is_computing and (threaded_blocks.size() == 0 or not compute_on_device(block, engine))) {
+        if (kernel_is_computing and (threaded_blocks.size() == 0 or
+                not compute_on_device(block, engine, symbols, bhir))) {
             if (verbose)
                 cout << "Offloading to CPU\n";
 
