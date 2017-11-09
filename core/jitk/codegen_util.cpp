@@ -129,12 +129,13 @@ void write_kernel_function_arguments(const SymbolTable &symbols,
                                      const bool all_pointers) {
     // We create the comma separated list of args and saves it in `stmp`
     stringstream stmp;
+    stmp << "__local float *a, __global volatile unsigned int *index, __global volatile float *res,     ";
     for (size_t i=0; i < symbols.getParams().size(); ++i) {
         bh_base *b = symbols.getParams()[i];
         if (array_type_prefix != nullptr) {
             stmp << array_type_prefix << " ";
         }
-        stmp << type_writer(b->type) << " * __restrict__ a" << symbols.baseID(b) << ", ";
+        stmp << type_writer(b->type) << " * a" << symbols.baseID(b) << ", ";
     }
     for (const bh_view *view: symbols.offsetStrideViews()) {
         stmp << type_writer(bh_type::UINT64);
@@ -200,11 +201,13 @@ void write_loop_block(const SymbolTable &symbols,
 
     // Let's scalar replace reduction outputs that reduces over the innermost axis
     vector<const bh_view*> scalar_replaced_reduction_outputs;
-    for (const InstrPtr &instr: ordered_block_sweeps) {
-        if (bh_opcode_is_reduction(instr->opcode) and sweeping_innermost_axis(instr)) {
-            if (local_tmps.find(instr->operand[0].base) == local_tmps.end() and
+    if (not opencl) {
+        for (const InstrPtr &instr: ordered_block_sweeps) {
+            if (bh_opcode_is_reduction(instr->opcode) and sweeping_innermost_axis(instr)) {
+                if (local_tmps.find(instr->operand[0].base) == local_tmps.end() and
                     (parent_scope == nullptr or parent_scope->isArray(instr->operand[0]))) {
-                scalar_replaced_reduction_outputs.push_back(&instr->operand[0]);
+                    scalar_replaced_reduction_outputs.push_back(&instr->operand[0]);
+                }
             }
         }
     }
@@ -283,7 +286,7 @@ void write_loop_block(const SymbolTable &symbols,
     {
         for (const InstrPtr &instr: ordered_block_sweeps) {
             const bh_view &v = instr->operand[0];
-            if (not (has_reduce_identity(instr->opcode) and (scope.isScalarReplaced(v) or scope.isTmp(v.base)))) {
+            if (not (has_reduce_identity(instr->opcode) and (opencl or scope.isScalarReplaced(v) or scope.isTmp(v.base)))) {
                 need_to_peel = true;
                 break;
             }
@@ -291,7 +294,7 @@ void write_loop_block(const SymbolTable &symbols,
     }
 
     // When not peeling, we need a neutral initial reduction value
-    if (not need_to_peel) {
+    if (not need_to_peel and not opencl) {
         for (const InstrPtr &instr: ordered_block_sweeps) {
             const bh_view &view = instr->operand[0];
             if (not scope.isArray(view) and not scope.isDeclared(view)) {
@@ -371,6 +374,27 @@ void write_loop_block(const SymbolTable &symbols,
         spaces(out, 4 + block.rank*4);
     }
 
+
+    const bh_instruction *reduce_instr = nullptr;
+    if (block._sweeps.size() == 1 and bh_opcode_is_reduction(block._sweeps.begin()->get()->opcode)) {
+        reduce_instr = block._sweeps.begin()->get();
+    }
+
+    if (reduce_instr != nullptr) {
+        out << "// Reduce Header\n";
+
+        std::string neutral_element = "(float)(INFINITY)";
+        std::string dtype = "float";
+
+        out << "size_t lid = get_local_id(0);\n"
+           << "size_t local_size = get_local_size(0);\n"
+           << dtype <<" acc = " << neutral_element << "; // Neutral element\n"
+           << "size_t global_size = get_global_size(0);\n"
+                   "while (i0 < " << block.size << "){\n";
+
+        out << "// Map operations\n";
+    }
+
     // Write the for-loop header
     head_writer(symbols, scope, block, config, need_to_peel, threaded_blocks, out);
 
@@ -437,6 +461,66 @@ void write_loop_block(const SymbolTable &symbols,
             }
         }
     }
+
+    if (reduce_instr != nullptr) {
+        out << "// Reduce Footer\n";
+
+        out <<     "    acc = min(acc, (float)" << scope.getName(reduce_instr->operand[1]);
+        write_array_subscription(scope, reduce_instr->operand[1], out);
+        out << ");\n"
+                "    i0 += global_size;\n"
+                "}\n"
+                "// All sub-results are put in local memory\n"
+                "if (((lid%2) != 0)){\n"
+                "    a[lid] = acc;\n"
+                "}\n"
+                "barrier(CLK_LOCAL_MEM_FENCE);\n"
+
+
+                "// Reduce local results in parallel\n"
+                "bool running = ((lid%2) == 0);\n"
+                "for (size_t i=1; i<=local_size/2; i<<=1){\n"
+                "    if (running){\n"
+                "        running = (lid%(i<<2) == 0);\n"
+                "        acc = min(acc, a[lid+i]);\n"
+                "        a[lid] = acc;\n"
+                "    }\n"
+                "    barrier(CLK_LOCAL_MEM_FENCE);\n"
+                "}\n"
+                "barrier(CLK_LOCAL_MEM_FENCE);\n"
+                "// Place work group's result in global result vector\n"
+                "if (lid == 0){\n"
+                "    res[get_group_id(0)] = acc;\n"
+                "}\n"
+                "barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);\n"
+                "unsigned int finish_id = 0;\n"
+                "if (lid == 0){\n"
+                "    finish_id = atomic_inc(index);\n"
+                "    a[0] = finish_id; // WARN: Type cast\n"
+                "}\n"
+                "barrier(CLK_LOCAL_MEM_FENCE);\n"
+                "if (lid != 0){\n"
+                "    finish_id = a[0];\n"
+                "}\n"
+                "barrier(CLK_LOCAL_MEM_FENCE);\n"
+                "if (finish_id == get_num_groups(0)-1){\n"
+                "    acc = res[lid];\n"
+                "    a[lid] = acc;\n"
+                "    barrier(CLK_LOCAL_MEM_FENCE);\n"
+                "    // REDUCE\n"
+                "    bool running = ((lid%2) == 0);\n"
+                "    for (size_t i=1; i<=local_size/2; i<<=1){\n"
+                "        if (running){\n"
+                "            running = (lid%(i<<2) == 0);\n"
+                "            acc = min(acc, a[lid+i]);\n"
+                "                a[lid] = acc;\n"
+                "        }\n"
+                "        barrier(CLK_LOCAL_MEM_FENCE);\n"
+                "    }\n"
+                "    res[lid] = a[lid];\n"
+                "}\n";
+    }
+
     spaces(out, 4 + block.rank*4);
     out << "}\n";
 
@@ -449,6 +533,7 @@ void write_loop_block(const SymbolTable &symbols,
         scope.getName(*view, out);
         out << ";\n";
     }
+
 }
 
 // Handle the extension methods within the 'bhir'

@@ -167,7 +167,7 @@ void loop_head_writer(const SymbolTable &symbols, Scope &scope, const LoopB &blo
             out << "=0; ";
         out << itername << " < " << block.size << "; ++" << itername << ") {\n";
     } else {
-        assert(block._sweeps.size() == 0);
+        //assert(block._sweeps.size() == 0);
         out << "{ // Threaded block (ID " << itername << ")\n";
     }
 }
@@ -196,7 +196,7 @@ void Impl::write_kernel(const Block &block, const SymbolTable &symbols, const Co
         for (unsigned int i=0; i < threaded_blocks.size(); ++i) {
             const LoopB *b = threaded_blocks[i];
             spaces(ss, 4);
-            ss << "const " << write_opencl_type(bh_type::UINT32) << " i" << b->rank << " = get_global_id(" << i << "); " \
+            ss << write_opencl_type(bh_type::UINT32) << " i" << b->rank << " = get_global_id(" << i << "); " \
                << "if (i" << b->rank << " >= " << b->size << ") {return;} // Prevent overflow\n";
         }
         ss << "\n";

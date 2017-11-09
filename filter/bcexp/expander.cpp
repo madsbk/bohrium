@@ -72,24 +72,6 @@ void Expander::expand(BhIR& bhir)
                 pc += increase;
             }
             break;
-
-        case BH_ADD_REDUCE:
-        case BH_MULTIPLY_REDUCE:
-        case BH_MINIMUM_REDUCE:
-        case BH_MAXIMUM_REDUCE:
-        case BH_LOGICAL_AND_REDUCE:
-        case BH_BITWISE_AND_REDUCE:
-        case BH_LOGICAL_OR_REDUCE:
-        case BH_BITWISE_OR_REDUCE:
-        case BH_LOGICAL_XOR_REDUCE:
-        case BH_BITWISE_XOR_REDUCE:
-            if (reduce1d_ && instr.operand[1].ndim == 1)
-            {
-                increase = expand_reduce1d(bhir, pc, reduce1d_);
-                end += increase;
-                pc += increase;
-            }
-            break;
         default:
             break;
         }

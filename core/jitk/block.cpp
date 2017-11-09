@@ -328,7 +328,13 @@ void LoopB::insert_system_after(InstrPtr instr, const bh_base *base) {
 }
 
 uint64_t LoopB::localThreading() const {
-    if (_sweeps.size() == 0 and not isSystemOnly()) {
+    // We can only handle reductions in parallel
+    for(const InstrPtr &instr: _sweeps) {
+        if (not bh_opcode_is_reduction(instr->opcode)) {
+            return 0;
+        }
+    }
+    if (not isSystemOnly()) {
         assert (size >= 0);
         return static_cast<uint64_t>(size);
     }
@@ -522,9 +528,6 @@ pair<vector<const LoopB *>, uint64_t> util_find_threaded_blocks(const LoopB &blo
     constexpr int MAX_NUM_OF_THREADED_BLOCKS = 3;
     ret.second = 1;
     for (const LoopB *b: block_list) {
-        if (b->_sweeps.size() > 0) {
-            break;
-        }
         const uint64_t thds = b->localThreading();
         if (thds > 0) {
             ret.first.push_back(b);
