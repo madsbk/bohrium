@@ -33,11 +33,11 @@ namespace {
 /* The View hash consists of the following fields:
  * <view_id><start><ndim>[<shape><stride><SEP_SHAPE>...]<SEP_OP>
  */
-void hash_stream(const bh_view &view, const SymbolTable &symbols, std::stringstream &ss) {
+void hash_stream(const bh_view &view, const SymbolTable &symbols, std::stringstream &ss, bool force_literals) {
     ss << "dtype: " << static_cast<uint32_t>(view.base->dtype());
     ss << "baseid: " << symbols.baseID(view.base);
 
-    if (symbols.strides_as_var) {
+    if (symbols.strides_as_var and not force_literals) {
         ss << "strideid: " << symbols.offsetStridesID(view);
     } else {
         ss << "vstart: " << view.start;
@@ -47,7 +47,7 @@ void hash_stream(const bh_view &view, const SymbolTable &symbols, std::stringstr
             ss << "stride: " << view.stride[j];
         }
     }
-    if (symbols.index_as_var) {
+    if (symbols.index_as_var and not force_literals) {
         ss << "indexid: " << symbols.idxID(view);
         if (view.is_scalar()) { // We optimize indexes into 1-sized arrays, which we need the hash to reflect
             ss << "is-1-elem: " << endl;
@@ -70,7 +70,7 @@ void hash_stream(const bh_instruction &instr, const SymbolTable &symbols, std::s
             }
             ss << "const dtype: " << static_cast<uint32_t >(instr.constant.type);
         } else {
-            hash_stream(op, symbols,  ss);
+            hash_stream(op, symbols,  ss, instr.opcode == BH_GATHER);
         }
     }
     ss << "sweep: " << instr.sweep_axis();

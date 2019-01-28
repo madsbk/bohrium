@@ -65,7 +65,7 @@ bool bh_instruction::all_same_shape() const {
 bool bh_instruction::reshapable() const {
     // It is not meaningful to reshape instructions with different shaped views
     // and for now we cannot reshape non-contiguous or sweeping instructions
-    return all_same_shape() and isContiguous() and not bh_opcode_is_sweep(opcode);
+    return all_same_shape() and isContiguous() and !bh_opcode_is_sweep(opcode) and opcode != BH_GATHER;
 }
 
 BhIntVec bh_instruction::shape() const {
@@ -77,11 +77,11 @@ BhIntVec bh_instruction::shape() const {
         const bh_view &view = operand[1];
         return view.shape;
     } else if (opcode == BH_GATHER) {
-        // The principal shape of a gather is the shape of the index and output array, which are equal.
+        // The principal shape of a gather is the shape of the output array.
         assert(operand.size() == 3);
         assert(not operand[1].isConstant());
         assert(not operand[2].isConstant());
-        const bh_view &view = operand[2];
+        const bh_view &view = operand[0];
         return view.shape;
     } else if (opcode == BH_SCATTER or opcode == BH_COND_SCATTER) {
         // The principal shape of a scatter is the shape of the index and input array, which are equal.
@@ -141,7 +141,7 @@ void bh_instruction::remove_axis(int64_t axis) {
         // In the input we can simply remove the axis
         for (size_t o = 1; o < operand.size(); ++o) {
             if (not(operand[o].isConstant() or     // Ignore constants
-                    (o == 1 and opcode == BH_GATHER))) // Ignore gather's first input operand
+                    (o == 2 and opcode == BH_GATHER))) // Ignore gather's second input operand
             {
                 operand[o].remove_axis(axis);
             }
@@ -179,7 +179,7 @@ void bh_instruction::transpose(int64_t axis1, int64_t axis2) {
         for (size_t o = 1; o < operand.size(); ++o) {
             bh_view &view = operand[o];
             if (not view.isConstant()) {
-                if (not (o == 1 and opcode == BH_GATHER)) { // The input array of gather has arbitrary shape and stride
+                if (not (o == 2 and opcode == BH_GATHER)) { // The second array of gather has arbitrary shape and stride
                     view.transpose(axis1, axis2);
                 }
             }

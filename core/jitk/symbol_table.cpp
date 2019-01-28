@@ -59,9 +59,12 @@ SymbolTable::SymbolTable(const LoopB &kernel,
         if (bh_opcode_is_accumulate(instr->opcode)) {
             _array_always.insert(instr->operand[0].base);
         } else if (instr->opcode == BH_GATHER) { // Gather accesses the input arbitrarily
-            if (not instr->operand[1].isConstant()) {
-                _array_always.insert(instr->operand[1].base);
-            }
+            assert(not instr->operand[0].isConstant());
+            assert(not instr->operand[1].isConstant());
+            assert(not instr->operand[2].isConstant());
+            _array_always.insert(instr->operand[0].base);
+            _array_always.insert(instr->operand[1].base);
+            _array_always.insert(instr->operand[2].base);
           // Scatter accesses the output arbitrarily
         } else if (instr->opcode == BH_SCATTER or instr->opcode == BH_COND_SCATTER) {
             _array_always.insert(instr->operand[0].base);

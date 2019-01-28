@@ -38,7 +38,7 @@ void simplify_instr(bh_instruction &instr) {
     }
 
     // Let's start by removing redundant 1-sized dimensions (but make sure we don't remove all dimensions!)
-    {
+    if (instr.opcode != BH_GATHER){
         const BhIntVec shape = instr.shape();
         const int sa = instr.sweep_axis();
         size_t ndim_left = bh_opcode_is_reduction(instr.opcode)?shape.size()-1:shape.size();

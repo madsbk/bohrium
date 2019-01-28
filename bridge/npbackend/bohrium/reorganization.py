@@ -4,6 +4,8 @@ Reorganization of Array Elements Routines
 """
 import warnings
 import numpy_force as numpy
+from functools import reduce
+import operator
 from . import bhary
 from bohrium_api import _info
 from ._util import is_scalar
@@ -12,10 +14,11 @@ from . import array_create
 from . import array_manipulation
 from . import ufuncs
 from . import numpy_backport
+from .user_kernel import make_behaving
 
 
 @fix_biclass_wrapper
-def gather(ary, indexes):
+def gatherOLD(ary, indexes):
     """
     gather(ary, indexes)
 
@@ -42,7 +45,7 @@ def gather(ary, indexes):
     # Convert a scalar index to a 1-element array
     if is_scalar(indexes):
         indexes = [indexes]
-        
+
     indexes = array_create.array(indexes, dtype=numpy.uint64, bohrium=True)
     ret = array_create.empty(indexes.shape, dtype=ary.dtype, bohrium=True)
     if ary.size == 0 or indexes.size == 0:
@@ -50,6 +53,32 @@ def gather(ary, indexes):
 
     _bh.ufunc(_info.op['gather']['id'], (ret, ary, indexes))
     return ret
+
+
+def prod(a):
+    return reduce(operator.mul, a, 1)
+
+
+def axis_split(A, axis):
+    (Am, Ai, An) = (prod(A.shape[:axis]), A.shape[axis], prod(A.shape[axis + 1:]))
+    return (Am, Ai, An)
+
+
+def gather(ary, idx, axis=0):
+    from . import _bh
+    (Am, Ai, An) = axis_split(ary, axis)
+    print(Am, Ai, An)
+    Ii = prod(idx.shape)
+    gather_shape = (Am, Ii, An)
+    ret_shape = list(ary.shape[:axis]) + list(idx.shape) + list(ary.shape[axis + 1:])
+
+    ary = make_behaving(ary).reshape((Am, Ai, An))
+    idx = make_behaving(idx, dtype=numpy.int64)  # .flatten(), dtype=numpy.int64)
+    ret = array_create.empty(gather_shape, dtype=ary.dtype)
+    print (ret.shape)
+    _bh.ufunc(_info.op['gather']['id'], (ret, ary, idx))
+
+    return ret.reshape(ret_shape)
 
 
 @fix_biclass_wrapper

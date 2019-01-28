@@ -279,9 +279,19 @@ void Engine::writeInstr(Scope &scope, const bh_instruction &instr, int indent, b
         // Format of GATHER: out[<loop-indexes>] = in1[in1.start + in2[<loop-indexes>]]
         ops.push_back(get_name_and_subscription(scope, instr.operand[0]));
         stringstream ss;
+        string in2_idx;
+        {
+            stringstream t;
+            scope.getName(instr.operand[2], t);
+            t << "[i1]";
+            in2_idx = t.str();
+        }
+        assert(instr.operand[0].ndim == 3);
+        assert(instr.operand[1].ndim == 3);
         scope.getName(instr.operand[1], ss);
-        ss << "[" << instr.operand[1].start << " + ";
-        get_name_and_subscription(scope, instr.operand[2], ss);
+        ss << "[" << instr.operand[1].start << " + i2 + (" << in2_idx << ">=0?" << in2_idx
+                  << ": " << instr.operand[1].shape[1] << "+" << in2_idx <<") * " << instr.operand[0].shape[2]
+                  << "+i0*" << instr.operand[1].shape[1] << "*" << instr.operand[0].shape[2];
         ss << "]";
         ops.push_back(ss.str());
     } else if (instr.opcode == BH_SCATTER or instr.opcode == BH_COND_SCATTER) {
